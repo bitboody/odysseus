@@ -4,6 +4,11 @@ import ipaddress
 
 import httpcore
 import httpx
+import gzip
+import socket
+import threading
+import ipaddress
+
 
 from services.memory import skill_importer
 
@@ -146,3 +151,65 @@ def test_get_checked_uses_fresh_transport_per_redirect_hop(monkeypatch):
         (second, {"Accept": "text/plain"}),
     ]
     assert str(response.url) == second
+
+def test_dns_rebinding_pinned_transport_dials_pinned_ip():
+    """Verify _PinnedTransport forces connection to the pinned IP while preserving original request semantics."""
+    # 1. Stand up a local loopback server
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(("127.0.0.1", 0))
+    server_socket.listen(1)
+    port = server_socket.getsockname()[1]
+
+    captured_request = b""
+    client_address = None
+
+    def handle_client():
+        nonlocal captured_request, client_address
+        try:
+            conn, addr = server_socket.accept()
+            client_address = addr
+            with conn:
+                captured_request = conn.recv(4096)
+                
+                # Serve a gzip-encoded payload
+                body = gzip.compress(b"successfully decoded gzip body")
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Encoding: gzip\r\n"
+                    b"Content-Length: " + str(len(body)).encode() + b"\r\n"
+                    b"\r\n"
+                    + body
+                )
+                conn.sendall(response)
+        except Exception:
+            pass
+        finally:
+            server_socket.close()
+
+    server_thread = threading.Thread(target=handle_client)
+    server_thread.start()
+
+    pinned_ip = ipaddress.ip_address("127.0.0.1")
+    transport = skill_importer._PinnedTransport([pinned_ip])
+    
+    # Target a mock DNS-rebinding hostname
+    url = f"http://rebind.example:{port}/secret-metadata"
+
+    try:
+        with httpx.Client(transport=transport) as client:
+            response = client.get(url)
+    finally:
+        server_thread.join(timeout=2.0)
+
+    # 2. Assert the socket destination / dialed IP was exactly the pinned loopback address
+    assert client_address is not None
+    assert client_address[0] == "127.0.0.1"
+
+    # 3. Assert the Host header preserved the original authority (hostname:port)
+    assert f"Host: rebind.example:{port}".encode() in captured_request
+
+    # 4. Assert the response URL matches the original intended request URL
+    assert str(response.url) == url
+
+    # 5. Assert the gzip-encoded body was automatically and correctly decoded
+    assert response.text == "successfully decoded gzip body"
