@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re 
 import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, cast
@@ -27,7 +28,7 @@ TEXT_NAMES = {"skill.md", "license", "license.md", "readme.md"}
 _GITHUB_HOSTS = frozenset({
     "github.com", "www.github.com", "api.github.com", "raw.githubusercontent.com",
 })
-_SKILLS_SH_HOSTS = frozenset({"skills.sh"})
+_SKILLS_SH_HOSTS = frozenset({"skills.sh", "www.skills.sh"})
 
 
 def _github_host(url: str) -> str:
@@ -291,12 +292,17 @@ def parse_skill_source(url: str) -> ResolvedSource:
             "Only GitHub or skills.sh URLs are supported"
         )
 
-    # skills.sh links must resolve to an exact supported GitHub host.
+# skills.sh links must resolve to an exact supported GitHub host via page body extraction.
     if hostname in _SKILLS_SH_HOSTS:
         r = _get_checked(url, timeout=20.0)
         if r.status_code >= 400:
             raise _github_response_error(r)
-        final = str(r.url)
+        
+        match = re.search(r"https?://github\.com/[^\s\"')]+", r.text or "")
+        if not match:
+            raise SkillImportError("Could not find a GitHub link on skills.sh page")
+        
+        final = match.group(0)
         _assert_github_url(final, context="redirect target")
         url = final
 

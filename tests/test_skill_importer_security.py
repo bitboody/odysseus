@@ -29,19 +29,17 @@ def test_parse_skill_source_rejects_unsupported_host_before_fetch(url):
             parse_skill_source(url)
     mock_get.assert_not_called()
 
-
-def test_parse_skill_source_allows_exact_skills_host():
-    """The documented skills.sh host may unwrap to an exact GitHub host."""
+def test_parse_skill_source_allows_skills_sh_extraction():
+    """The skills.sh host serves an HTML page containing an embedded GitHub link."""
     with patch("services.memory.skill_importer._get_checked") as mock_get:
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.url = "https://github.com/test-owner/test-repo"
+        mock_response.text = '<html><body><a href="https://github.com/test-owner/test-repo">Repository</a></body></html>'
         mock_get.return_value = mock_response
 
         source = parse_skill_source("https://skills.sh/my-skill")
         assert source.owner == "test-owner"
         assert source.repo == "test-repo"
-
 
 def test_parse_skill_source_valid_github():
     """Ensure standard GitHub URLs parse into the correct ResolvedSource fields."""
