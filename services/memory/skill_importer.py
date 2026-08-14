@@ -299,8 +299,10 @@ def parse_skill_source(url: str) -> ResolvedSource:
         final = str(r.url)
         if _github_host(final) not in _GITHUB_HOSTS:
             raise SkillImportError(
-                "skills.sh did not redirect to GitHub — open the skill on "
-                "skills.sh, follow its GitHub link, and paste that URL instead"
+                "skills.sh did not redirect to GitHub — open the skill's "
+                "repository on GitHub, navigate to the exact skill folder or "
+                "SKILL.md file, and paste that URL; the repository-root link "
+                "alone is not sufficient"
             )
         url = final
 

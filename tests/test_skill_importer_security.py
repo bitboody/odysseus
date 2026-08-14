@@ -61,8 +61,14 @@ def test_parse_skill_source_rejects_skills_sh_page_that_never_reaches_github():
         mock_response.text = body
         mock_get.return_value = mock_response
 
-        with pytest.raises(SkillImportError, match="did not redirect to GitHub"):
+        with pytest.raises(
+            SkillImportError, match="did not redirect to GitHub"
+        ) as exc_info:
             parse_skill_source("https://skills.sh/anthropics/skills/pdf")
+
+    message = str(exc_info.value)
+    assert "exact skill folder or SKILL.md file" in message
+    assert "repository-root link alone is not sufficient" in message
 
 
 @pytest.mark.parametrize(
