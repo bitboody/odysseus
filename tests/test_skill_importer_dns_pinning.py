@@ -173,7 +173,18 @@ def test_dns_rebinding_pinned_transport_dials_pinned_ip():
         try:
             conn, client_address = server_socket.accept()
             with conn:
-                captured_request = conn.recv(4096)
+                conn.settimeout(2.0)
+                while b"\r\n\r\n" not in captured_request:
+                    if len(captured_request) >= 16_384:
+                        raise AssertionError("request headers exceeded 16 KiB")
+                    chunk = conn.recv(min(4096, 16_384 - len(captured_request)))
+                    if not chunk:
+                        break
+                    captured_request += chunk
+                if b"\r\n\r\n" not in captured_request:
+                    raise AssertionError(
+                        "connection closed before request headers completed"
+                    )
                 body = gzip.compress(b"successfully decoded gzip body")
                 conn.sendall(
                     b"HTTP/1.1 200 OK\r\n"
@@ -201,6 +212,6 @@ def test_dns_rebinding_pinned_transport_dials_pinned_ip():
     assert server_error is None, server_error
     assert not server_thread.is_alive()
     assert client_address is not None and client_address[0] == "127.0.0.1"
-    assert f"Host: rebind.example:{port}".encode() in captured_request
+    assert f"host: rebind.example:{port}".encode() in captured_request.lower()
     assert str(response.url) == url
     assert response.text == "successfully decoded gzip body"
