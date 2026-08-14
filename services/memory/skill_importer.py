@@ -4,7 +4,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import re 
 import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple, cast
@@ -269,36 +268,40 @@ def parse_skill_source(url: str) -> ResolvedSource:
     if not url:
         raise SkillImportError("URL is required")
 
-    if "://" in url:
-        scheme, _ = url.split("://", 1)
-        if scheme.lower() not in ("http", "https"):
+    # ``urlparse`` only reports an unambiguous scheme when the URL carries the
+    # ``scheme://`` form. Opaque schemes (``mailto:``, ``javascript:``) and a
+    # schemeless ``host:port`` both parse a "scheme" that is not one, so they
+    # fall through to the host check below and are rejected on the host instead.
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        if scheme and url.lower().startswith(f"{scheme}://"):
             raise SkillImportError(f"unsupported URL scheme: {scheme}")
-    else:
-        parsed_rough = urlparse("//" + url)
-        hostname = (parsed_rough.hostname or "").lower()
-
-        if hostname in _GITHUB_HOSTS or hostname in _SKILLS_SH_HOSTS:
-            url = "https://" + url
-        else:
-                raise SkillImportError("URL is required")
+        # Schemeless "github.com/owner/repo" — accept only a supported host.
+        rough_host = (urlparse("//" + url).hostname or "").lower()
+        if rough_host not in _GITHUB_HOSTS and rough_host not in _SKILLS_SH_HOSTS:
+            raise SkillImportError("Only GitHub or skills.sh URLs are supported")
+        url = "https://" + url
 
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
     if hostname not in _GITHUB_HOSTS and hostname not in _SKILLS_SH_HOSTS:
         raise SkillImportError("Only GitHub or skills.sh URLs are supported")
 
-# skills.sh links must resolve to an exact supported GitHub host via page body extraction.
+    # A skills.sh link is only usable if it redirects to an exact supported
+    # GitHub host. Scraping the page body for a github.com link cannot work:
+    # skill pages only ever link the repository root, never the skill's
+    # subdirectory, so the scrape resolves every skill in a repo to the same
+    # (wrong) bundle. Fail with an actionable message instead.
     if hostname in _SKILLS_SH_HOSTS:
         r = _get_checked(url, timeout=20.0)
         if r.status_code >= 400:
             raise _github_response_error(r)
-        
-        match = re.search(r"https?://github\.com/[^\s\"')]+", r.text or "")
-        if not match:
-            raise SkillImportError("Could not find a GitHub link on skills.sh page")
-        
-        final = match.group(0)
-        _assert_github_url(final, context="redirect target")
+        final = str(r.url)
+        if _github_host(final) not in _GITHUB_HOSTS:
+            raise SkillImportError(
+                "skills.sh did not redirect to GitHub — open the skill on "
+                "skills.sh, follow its GitHub link, and paste that URL instead"
+            )
         url = final
 
     # Update parsed and hostname to reflect the new GitHub URL
