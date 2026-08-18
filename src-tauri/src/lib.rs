@@ -5,7 +5,6 @@ use tauri::{Url, Manager};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_target_url])
         .setup(|app| {
             let addr: SocketAddr = "127.0.0.1:7000".parse().unwrap();
 
@@ -35,12 +34,14 @@ pub fn run() {
             // Navigate it to the correct URL
             window.navigate(target_url);
 
+            println!("Target URL: {}", target_url_str);
+            println!("OS: {}", check_os());
+
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
 
 // Helper Functions
 fn get_target_url(fallback_url: String) -> String {
@@ -52,4 +53,8 @@ fn get_target_url(fallback_url: String) -> String {
     } else {
         fallback_url
     }
+}
+
+fn check_os() -> String {
+    return std::env::consts::OS.to_string();
 }
