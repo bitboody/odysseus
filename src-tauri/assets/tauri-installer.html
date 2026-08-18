@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Odysseus — Installer</title>
+  <link rel="stylesheet" href="tauri-style.css">
+</head>
+<body>
+  <div class="installer-shell">
+    <div class="installer-card">
+      <div class="brand-row">
+        <div class="brand-mark">O</div>
+        <div>
+          <p class="eyebrow">Odysseus Desktop</p>
+          <h1>Installer</h1>
+        </div>
+      </div>
+
+      <div class="status-pill">Ready to install</div>
+
+      <p class="lead">
+        Set up Odysseus on this machine and launch the desktop app with the same dark,
+        focused interface as the rest of the experience.
+      </p>
+
+      <ul class="feature-list">
+        <li>Local-first desktop environment</li>
+        <li>Fast startup and update support</li>
+        <li>Secure app data and settings</li>
+      </ul>
+
+      <div class="cta-row">
+        <button id="install-button" class="primary-action" type="button">Install</button>
+        <button class="secondary-action" type="button">Learn more</button>
+      </div>
+
+      <div class="meta-row">
+        <span>Version 1.0.0</span>
+        <span>Installation size: ~300 MB</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const installButton = document.getElementById('install-button');
+
+    installButton?.addEventListener('click', () => {
+      installButton.classList.add('is-installing');
+      installButton.textContent = 'Installing…';
+      installButton.disabled = true;
+
+      window.setTimeout(() => {
+        installButton.textContent = 'Installed';
+      }, 1200);
+    });
+  </script>
+</body>
+</html>
