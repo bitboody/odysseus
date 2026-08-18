@@ -35,7 +35,6 @@ pub fn run() {
             window.navigate(target_url);
 
             println!("Target URL: {}", target_url_str);
-            println!("OS: {}", check_os());
 
             Ok(())
         })
@@ -53,8 +52,4 @@ fn get_target_url(fallback_url: String) -> String {
     } else {
         fallback_url
     }
-}
-
-fn check_os() -> String {
-    return std::env::consts::OS.to_string();
 }
