@@ -2,8 +2,10 @@
 use std::path::Path;
 
 fn main() {
-    println!("{}", check_installation_state(check_os()));
-    odysseus_lib::run();
+    let is_installed = check_installation_state(check_os());
+    let os_name = check_os();
+    println!("{}", is_installed);
+    odysseus_lib::run(os_name.to_string(), is_installed);
 }
 
 fn check_os() -> &'static str {
