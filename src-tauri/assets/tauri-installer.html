@@ -1,72 +1,101 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Odysseus — Installer</title>
-  <link rel="stylesheet" href="tauri-style.css">
-</head>
-<body>
-  <div class="installer-shell">
-    <div class="installer-card">
-      <div class="brand-row">
-        <div class="brand-mark">O</div>
-        <div>
-          <p class="eyebrow">Odysseus Desktop</p>
-          <h1>Installer</h1>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Odysseus — Installer</title>
+  </head>
+  <body>
+    <div class="installer-shell">
+      <div class="installer-card">
+        <div class="brand-row">
+          <div class="brand-mark">O</div>
+          <div>
+            <p class="eyebrow">Odysseus Desktop</p>
+            <h1>Installer</h1>
+          </div>
+        </div>
+
+        <div class="status-pill">Ready to install</div>
+
+        <p class="lead">
+          Set up Odysseus on this machine and launch the desktop app with the
+          same dark, focused interface as the rest of the experience.
+        </p>
+
+        <ul class="feature-list">
+          <li>Local-first desktop environment</li>
+          <li>Fast startup and update support</li>
+          <li>Secure app data and settings</li>
+        </ul>
+
+        <div class="cta-row">
+          <button id="install-button" class="primary-action" type="button">
+            Install
+          </button>
+          <button id="learn-more-button" class="secondary-action" type="button">
+            Learn more
+          </button>
+        </div>
+
+        <p class="lead" id="installation-message"></p>
+
+        <div class="meta-row">
+          <span>Version 1.0.0</span>
+          <span>Installation size: ~300 MB</span>
         </div>
       </div>
-
-      <div class="status-pill">Ready to install</div>
-
-      <p class="lead">
-        Set up Odysseus on this machine and launch the desktop app with the same dark,
-        focused interface as the rest of the experience.
-      </p>
-
-      <ul class="feature-list">
-        <li>Local-first desktop environment</li>
-        <li>Fast startup and update support</li>
-        <li>Secure app data and settings</li>
-      </ul>
-
-      <div class="cta-row">
-        <button id="install-button" class="primary-action" type="button">Install</button>
-        <button id="learn-more-button" class="secondary-action" type="button">Learn more</button>
-      </div>
-
-      <p class="lead" id="installation-message">
-      </p>
-
-      <div class="meta-row">
-        <span>Version 1.0.0</span>
-        <span>Installation size: ~300 MB</span>
-      </div>
     </div>
-  </div>
+    <script>
+      // Access Tauri API globally instead of using 'import'
+      // Note: Use window.__TAURI__.invoke if you are on Tauri v1
+      const invoke = window.__TAURI__.core.invoke;
 
-  <script>
-    const installButton = document.getElementById('install-button');
-    const learnMoreButton = document.getElementById('learn-more-button');
+      const installButton = document.getElementById("install-button");
+      const learnMoreButton = document.getElementById("learn-more-button");
+      const installationMessage = document.getElementById(
+        "installation-message",
+      );
 
-    const installationMessage = document.getElementById('installation-message');
+      installButton?.addEventListener("click", async () => {
+        if (installButton.disabled) return;
 
-    installButton?.addEventListener('click', () => {
-      installButton.classList.add('is-installing');
-      installButton.textContent = 'Installing…';
-      installationMessage.textContent = 'Installing Odysseus on this machine. This may take a few minutes…';
-      installButton.disabled = true;
+        // 1. Update UI to loading state
+        installButton.classList.add("is-installing");
+        installButton.textContent = "Installing…";
+        installationMessage.textContent =
+          "Installing... This may take up to 30 minutes. Do not close this window.";
+        installButton.disabled = true;
 
-      // When the installation is complete, update the button text to "Installed", And ask user to restart the app
-      window.setTimeout(() => {
-        installButton.textContent = 'Installed';
-        installationMessage.textContent = 'Odysseus has been installed successfully! Please restart the app to continue.';
-      }, 1200);
-    });
+        try {
+          // 2. Invoke the Rust command
+          const [message, success] = await invoke(
+            "windows_installation_script",
+          );
 
-    learnMoreButton?.addEventListener('click', () => {
-      window.open('https://odysseus-dev.github.io/odysseus/', '_blank');
-    });
-  </script>
-</body>
+          if (success) {
+            installButton.textContent = "Installed";
+            installationMessage.textContent =
+              "Odysseus has been installed successfully! Please restart the app to continue.";
+          } else {
+            // Handle failure
+            installButton.classList.remove("is-installing");
+            installButton.textContent = "Install Failed";
+            installationMessage.textContent = `Error: ${message}`;
+            installButton.disabled = false;
+          }
+        } catch (error) {
+          console.error("Error during installation invocation:", error);
+          installButton.classList.remove("is-installing");
+          installButton.textContent = "Install";
+          installationMessage.textContent = `Unexpected error: ${error}`;
+          installButton.disabled = false;
+        }
+      });
+
+      learnMoreButton?.addEventListener("click", () => {
+        window.open("https://odysseus-dev.github.io/odysseus/", "_blank");
+      });
+    </script>
+  </body>
 </html>
