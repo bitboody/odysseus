@@ -39,7 +39,7 @@ pub fn run(os_name: String, is_installed: bool) {
             let window = app.get_webview_window("main").unwrap();
 
             // Navigate it to the correct URL
-            window.navigate(target_url);
+            let _ = window.navigate(target_url);
 
             println!("Target URL: {}", target_url_str);
 
