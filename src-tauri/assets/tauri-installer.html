@@ -32,8 +32,11 @@
 
       <div class="cta-row">
         <button id="install-button" class="primary-action" type="button">Install</button>
-        <button class="secondary-action" type="button">Learn more</button>
+        <button id="learn-more-button" class="secondary-action" type="button">Learn more</button>
       </div>
+
+      <p class="lead" id="installation-message">
+      </p>
 
       <div class="meta-row">
         <span>Version 1.0.0</span>
@@ -44,15 +47,25 @@
 
   <script>
     const installButton = document.getElementById('install-button');
+    const learnMoreButton = document.getElementById('learn-more-button');
+
+    const installationMessage = document.getElementById('installation-message');
 
     installButton?.addEventListener('click', () => {
       installButton.classList.add('is-installing');
       installButton.textContent = 'Installing…';
+      installationMessage.textContent = 'Installing Odysseus on this machine. This may take a few minutes…';
       installButton.disabled = true;
 
+      // When the installation is complete, update the button text to "Installed", And ask user to restart the app
       window.setTimeout(() => {
         installButton.textContent = 'Installed';
+        installationMessage.textContent = 'Odysseus has been installed successfully! Please restart the app to continue.';
       }, 1200);
+    });
+
+    learnMoreButton?.addEventListener('click', () => {
+      window.open('https://odysseus-dev.github.io/odysseus/', '_blank');
     });
   </script>
 </body>
