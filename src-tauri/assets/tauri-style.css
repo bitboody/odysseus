@@ -371,3 +371,67 @@ button:active {
     width: 100%;
   }
 }
+
+.loader-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 48px;
+  padding-bottom: 48px;
+}
+
+.loader-brand {
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+/* Modifies your existing status pill for the loading state */
+.loading-pill {
+  background: rgba(97, 175, 239, 0.08);
+  border-color: rgba(97, 175, 239, 0.32);
+  color: var(--fg);
+  margin-top: 24px;
+  margin-bottom: 32px;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.loading-pill::before {
+  background: var(--fg);
+  box-shadow: 0 0 0 4px rgba(97, 175, 239, 0.14);
+  animation: pulse-dot 1.5s infinite;
+}
+
+/* Sleek indeterminate progress bar */
+.progress-track {
+  width: 100%;
+  max-width: 280px;
+  height: 4px;
+  background: rgba(53, 90, 102, 0.3); /* Uses your --border color */
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 30%;
+  background: var(--red);
+  border-radius: 4px;
+  animation: scan 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Animations */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+@keyframes scan {
+  0% { left: -30%; width: 30%; background: var(--red); }
+  50% { left: 30%; width: 70%; background: var(--fg); }
+  100% { left: 100%; width: 30%; background: var(--red); }
+}
