@@ -139,11 +139,13 @@ pub fn run(is_installed: bool) {
 }
 
 pub mod commands {
-    use super::*;
+    use tauri::utils::config;
+
+use super::*;
 
     #[tauri::command]
     pub fn check_installation_status() -> bool {
-        let config_path = PathBuf::from(get_odysseus_dir()).join("config.json");
+        let config_path = PathBuf::from(get_config_dir()).join("config.json");
         config_path.exists()
     }
 
@@ -246,7 +248,10 @@ pub mod commands {
         }
 
         // Write config.json into Documents/Odysseus Desktop/config.json
-        let config_path = PathBuf::from(&target_dir).join("config.json");
+        let config_dir = get_config_dir();
+        let _ = std::fs::create_dir_all(&config_dir);
+
+        let config_path = PathBuf::from(&config_dir).join("config.json");
         let config_content = "{\n  \"installed\": true\n}\n";
 
         if let Err(e) = std::fs::write(&config_path, config_content) {
@@ -396,7 +401,25 @@ fn close_odysseus() {
 }
 
 fn get_odysseus_dir() -> String {
+    #[cfg(target_os = "windows")]
     let base_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+
+    #[cfg(not(target_os = "windows"))]
+    let base_dir = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+
+    let mut path = PathBuf::from(base_dir);
+    path.push("Documents");
+    path.push("Odysseus");
+    path.to_string_lossy().to_string()
+}
+
+fn get_config_dir() -> String {
+    #[cfg(target_os = "windows")]
+    let base_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+
+    #[cfg(not(target_os = "windows"))]
+    let base_dir = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+
     let mut path = PathBuf::from(base_dir);
     path.push("Documents");
     path.push("Odysseus Desktop");
