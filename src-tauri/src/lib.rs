@@ -1,13 +1,15 @@
 use std::net::{SocketAddr, TcpStream};
+use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 use tauri::{Manager, Url};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(os_name: String, is_installed: bool) {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![windows_installation_script])
-        // 1. Create a secure custom protocol to serve your injected HTML strings
+        // Create a secure custom protocol to serve your injected HTML strings
         .register_uri_scheme_protocol("odysseus", move |_app, request| {
             let path = request.uri().path();
             let fallback_css = include_str!("../assets/tauri-style.css");
@@ -34,10 +36,14 @@ pub fn run(os_name: String, is_installed: bool) {
                 .unwrap()
         })
         .setup(move |app| {
-            println!("OS: {}", os_name);
-            println!("Is Installed: {}", is_installed);
+            if is_installed {
+                println!("Odysseus is installed. Checking if it's running...");
+                run_odysseus();
+            } else {
+                println!("Odysseus is not installed. Please run the installer.");
+            }
 
-            // 2. Format the URL based on the Operating System
+            // Format the URL based on the Operating System
             // Windows WebView2 blocks top-level navigation to custom protocols.
             // Tauri bypasses this by intercepting "http://<scheme>.localhost" for us.
             #[cfg(target_os = "windows")]
@@ -65,6 +71,17 @@ pub fn run(os_name: String, is_installed: bool) {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    println!("User clicked X. Shutting down containers...");
+                    close_odysseus();
+                    println!("Teardown complete. Goodbye!");
+                }
+                _ => {} // Ignore all other window events (resize, minimize, etc.)
+            }
+        })
+        .invoke_handler(tauri::generate_handler![windows_installation_script])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -209,7 +226,117 @@ fn windows_installation_script() -> (String, bool) {
     )
 }
 
+fn ensure_docker_is_running() -> Result<(), String> {
+    if run_system_command("docker", &["info"]).is_ok() {
+        return Ok(());
+    }
+
+    println!("Docker daemon is offline. Attempting to launch Docker Desktop...");
+
+    // OS-specific launch commands (Fire-and-forget using .spawn())
+    #[cfg(target_os = "windows")]
+    let launch_result =
+        Command::new("C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe").spawn();
+
+    #[cfg(target_os = "macos")]
+    let launch_result = Command::new("open").arg("-a").arg("Docker").spawn();
+
+    #[cfg(target_os = "linux")]
+    let launch_result = Command::new("sudo")
+        .args(&["systemctl", "start", "docker"])
+        .spawn();
+
+    if let Err(e) = launch_result {
+        return Err(format!("Could not launch Docker automatically: {}", e));
+    }
+
+    // Poll until the engine is responsive
+    let max_retries = 30; // 60 seconds total wait time
+    for attempt in 1..=max_retries {
+        if run_system_command("docker", &["info"]).is_ok() {
+            println!("Docker daemon is now online and ready!");
+            return Ok(());
+        }
+        println!(
+            "Waiting for Docker engine to initialize... (Attempt {}/{})",
+            attempt, max_retries
+        );
+        thread::sleep(Duration::from_secs(2));
+    }
+
+    Err("Docker daemon took too long to start. Please check Docker Desktop manually.".to_string())
+}
+
+fn run_odysseus() {
+    // Guarantee Docker is awake before doing anything else
+    if let Err(e) = ensure_docker_is_running() {
+        println!("Error: {}", e);
+        return; // Bail out safely without crashing the UI
+    }
+
+    match run_system_command("docker", &["ps"]) {
+        Ok(output) => {
+            if output.contains("odysseus") {
+                println!("Odysseus is already running.");
+            } else {
+                println!("Starting Odysseus...");
+                let compose_file = get_compose_file_path();
+
+                match run_system_command("docker", &["compose", "-f", &compose_file, "up", "-d"]) {
+                    Ok(_) => println!("Odysseus started successfully."),
+                    Err(e) => println!("Failed to start Odysseus: {}", e),
+                }
+            }
+        }
+        Err(_) => println!("Unexpected error checking docker ps."),
+    }
+}
+
+fn close_odysseus() {
+    // If Docker is offline, the containers are dead. Exit immediately.
+    if run_system_command("docker", &["info"]).is_err() {
+        println!("Docker is offline. Assuming Odysseus is already stopped.");
+        return;
+    }
+
+    // If Docker is online, safely stop the containers
+    match run_system_command("docker", &["ps"]) {
+        Ok(output) => {
+            if !output.contains("odysseus") {
+                println!("Odysseus is not running.");
+            } else {
+                println!("Closing Odysseus...");
+                let compose_file = get_compose_file_path();
+
+                match run_system_command("docker", &["compose", "-f", &compose_file, "stop"]) {
+                    Ok(_) => println!("Odysseus stopped successfully."),
+                    Err(e) => println!("Failed to stop Odysseus: {}", e),
+                }
+            }
+        }
+        Err(_) => println!("Unexpected error checking docker ps."),
+    }
+}
+
 // Helper Functions
+fn get_compose_file_path() -> String {
+    // 1. Get the correct Home Directory based on the OS
+    #[cfg(target_os = "windows")]
+    let base_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+
+    #[cfg(not(target_os = "windows"))]
+    let base_dir = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+
+    // 2. Use PathBuf to safely construct the path with the correct OS slashes
+    let mut path = PathBuf::from(base_dir);
+    path.push("Documents");
+    path.push("Odysseus");
+    path.push("docker-compose.yml");
+
+    // 3. Convert back to a String for the command runner
+    path.to_string_lossy().to_string()
+}
+
 fn get_target_url(fallback_url: String, installer_url: String, is_installed: bool) -> String {
     if !is_installed {
         return installer_url;

@@ -16,10 +16,10 @@ fn check_installation_state(os: &str) -> bool {
     let config_file_path = match os {
         "windows" => std::env::var("USERPROFILE")
             .ok()
-            .map(|val| format!("{}\\Documents\\Odysseus\\config.json", val)),
+            .map(|val| format!("{}\\Documents\\Odysseus Desktop\\config.json", val)),
         "macos" | "linux" => std::env::var("HOME")
             .ok()
-            .map(|val| format!("{}/Documents/Odysseus/config.json", val)),
+            .map(|val| format!("{}/Documents/Odysseus Desktop/config.json", val)),
         _ => None,
     };
 
