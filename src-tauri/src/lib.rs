@@ -67,7 +67,7 @@ pub fn run(is_installed: bool) {
                     run_odysseus();
 
                     println!("Polling for localhost:7000 to serve HTTP 200...");
-                    let addr: SocketAddr = "~800 127.0.0.1:7000".parse().unwrap();
+                    let addr: SocketAddr = "127.0.0.1:7000".parse().unwrap();
 
                     loop {
                         if let Ok(mut stream) =
