@@ -1,20 +1,18 @@
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{Manager, Url};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(os_name: String, is_installed: bool) {
+pub fn run(is_installed: bool) {
     tauri::Builder::default()
         // Create a secure custom protocol to serve your injected HTML strings
         .register_uri_scheme_protocol("odysseus", move |_app, request| {
             let path = request.uri().path();
             let fallback_css = include_str!("../assets/tauri-style.css");
 
-            // Serve the installer or 404 based on the virtual path
             let html = if path.contains("installer") {
                 include_str!("../assets/tauri-installer.html").replace(
                     "</head>",
