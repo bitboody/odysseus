@@ -15,12 +15,10 @@
 
         <h1>Odysseus</h1>
 
-        <!-- Reusing your status pill, but modified for loading -->
         <div class="status-pill loading-pill">
           <span id="status-text">Booting Docker daemon...</span>
         </div>
 
-        <!-- Dev-style indeterminate progress bar -->
         <div class="progress-track">
           <div class="progress-indicator"></div>
         </div>
@@ -28,7 +26,6 @@
     </div>
 
     <script>
-      // Terminal-style loading text cycle
       const messages = [
         "Booting Docker daemon...",
         "Allocating resources...",
@@ -42,7 +39,6 @@
       let currentIndex = 0;
 
       setInterval(() => {
-        // Simple glitch/fade effect for the text change
         statusElement.style.opacity = "0";
 
         setTimeout(() => {
