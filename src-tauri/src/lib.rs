@@ -1,3 +1,4 @@
+use std::io::{Read, Write}; // <-- Add this line
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
@@ -8,13 +9,21 @@ use tauri::{Manager, Url};
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(is_installed: bool) {
     tauri::Builder::default()
-        // Create a secure custom protocol to serve your injected HTML strings
         .register_uri_scheme_protocol("odysseus", move |_app, request| {
             let path = request.uri().path();
             let fallback_css = include_str!("../assets/tauri-style.css");
 
-            let html = if path.contains("installer") {
+            // 1. We now handle the root path ("/" or "") directly based on installation status
+            let html = if path.contains("installer")
+                || (!is_installed && (path == "/" || path.is_empty()))
+            {
                 include_str!("../assets/tauri-installer.html").replace(
+                    "</head>",
+                    &format!("<style>\n{fallback_css}\n</style>\n</head>"),
+                )
+            } else if path.contains("loading") || (is_installed && (path == "/" || path.is_empty()))
+            {
+                include_str!("../assets/tauri-loading.html").replace(
                     "</head>",
                     &format!("<style>\n{fallback_css}\n</style>\n</head>"),
                 )
@@ -25,59 +34,110 @@ pub fn run(is_installed: bool) {
                 )
             };
 
-            // Return it as a highly compliant HTTP response
             tauri::http::Response::builder()
-                .status(200) // Explicitly say "200 OK"
+                .status(200)
                 .header("Content-Type", "text/html; charset=utf-8")
-                .header("Access-Control-Allow-Origin", "*") // Prevent cross-origin blocks
+                .header("Access-Control-Allow-Origin", "*")
                 .body(html.into_bytes())
                 .unwrap()
         })
         .setup(move |app| {
-            if is_installed {
-                println!("Odysseus is installed. Checking if it's running...");
-                run_odysseus();
-            } else {
-                println!("Odysseus is not installed. Please run the installer.");
-            }
+            let app_handle = app.handle().clone();
+            let window = app_handle.get_webview_window("main").unwrap();
 
-            // Format the URL based on the Operating System
-            // Windows WebView2 blocks top-level navigation to custom protocols.
-            // Tauri bypasses this by intercepting "http://<scheme>.localhost" for us.
+            // KICKSTART THE ROUTER: Force the webview to hit our custom protocol immediately
             #[cfg(target_os = "windows")]
-            let (fallback_url, installer_url) = (
-                "http://odysseus.localhost/404".to_string(),
-                "http://odysseus.localhost/installer".to_string(),
-            );
+            let initial_url = if is_installed {
+                "http://odysseus.localhost/loading"
+            } else {
+                "http://odysseus.localhost/installer"
+            };
 
             #[cfg(not(target_os = "windows"))]
-            let (fallback_url, installer_url) = (
-                "odysseus://localhost/404".to_string(),
-                "odysseus://localhost/installer".to_string(),
-            );
+            let initial_url = if is_installed {
+                "odysseus://localhost/loading"
+            } else {
+                "odysseus://localhost/installer"
+            };
 
-            let target_url_str = get_target_url(fallback_url, installer_url, is_installed);
-            let target_url = Url::parse(&target_url_str).unwrap();
+            let _ = window.navigate(Url::parse(initial_url).unwrap());
 
-            // Grab the window created by tauri.conf.json
-            let window = app.get_webview_window("main").unwrap();
+            // 2. Start the background services
+            if is_installed {
+                println!("Odysseus is installed. Spinning up background services...");
 
-            // Navigate it to the correct URL
-            let _ = window.navigate(target_url);
+                std::thread::spawn(move || {
+                    run_odysseus();
 
-            println!("Target URL: {}", target_url_str);
+                    println!("Polling for localhost:7000 to serve HTTP 200...");
+                    let addr: SocketAddr = "127.0.0.1:7000".parse().unwrap();
+
+                    loop {
+                        // Keep a fast connection timeout, but...
+                        if let Ok(mut stream) =
+                            TcpStream::connect_timeout(&addr, Duration::from_millis(500))
+                        {
+                            // 1. Give the server up to 3 seconds to actually generate the HTTP response
+                            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                            
+                            let request =
+                                "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+
+                            if stream.write_all(request.as_bytes()).is_ok() {
+                                let mut buffer = [0; 1024];
+                                
+                                if let Ok(bytes_read) = stream.read(&mut buffer) {
+                                    let response = String::from_utf8_lossy(&buffer[..bytes_read]);
+                                    
+                                    // Extract just the first line (e.g., "HTTP/1.1 200 OK")
+                                    let first_line = response.lines().next().unwrap_or("Empty Response");
+                                    println!("Pinged localhost:7000. Server replied: {}", first_line);
+
+                                    // 2. Accept 2xx (Success) OR 3xx (Redirects)
+                                    if first_line.starts_with("HTTP/1.1 20")
+                                        || first_line.starts_with("HTTP/1.0 20")
+                                        || first_line.starts_with("HTTP/1.1 30")
+                                        || first_line.starts_with("HTTP/1.0 30")
+                                    {
+                                        println!(
+                                            "Server is fully booted and responsive! Navigating to live app..."
+                                        );
+
+                                        let thread_window =
+                                            app_handle.get_webview_window("main").unwrap();
+                                        let _ = thread_window
+                                            .navigate(Url::parse("http://localhost:7000").unwrap());
+
+                                        break;
+                                    }
+                                } else {
+                                    println!("TCP connected, but timed out waiting for the HTTP response.");
+                                }
+                            }
+                        } else {
+                            println!("Waiting for port 7000 to open...");
+                        }
+
+                        thread::sleep(Duration::from_millis(1000));
+                    }
+
+                });
+            } else {
+                println!("Odysseus is not installed. Waiting for user in installer UI...");
+            }
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { api, .. } => {
-                    println!("User clicked X. Shutting down containers...");
-                    close_odysseus();
-                    println!("Teardown complete. Goodbye!");
-                }
-                _ => {} // Ignore all other window events (resize, minimize, etc.)
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api: _, .. } => {
+                println!(
+                    "User clicked X on window: {}. Shutting down containers...",
+                    window.label()
+                );
+                close_odysseus();
+                println!("Teardown complete. Goodbye!");
             }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![windows_installation_script])
         .run(tauri::generate_context!())
@@ -233,8 +293,29 @@ fn ensure_docker_is_running() -> Result<(), String> {
 
     // OS-specific launch commands (Fire-and-forget using .spawn())
     #[cfg(target_os = "windows")]
-    let launch_result =
-        Command::new("C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe").spawn();
+    let launch_result = {
+        let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\".to_string());
+
+        // Check standard user-level paths vs system-wide path
+        let user_path_1 = format!(
+            "{}\\Programs\\DockerDesktop\\Docker Desktop.exe",
+            local_app_data
+        );
+        let user_path_2 = format!(
+            "{}\\Programs\\Docker\\Docker\\Docker Desktop.exe",
+            local_app_data
+        );
+        let system_path = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+
+        if std::path::Path::new(&user_path_1).exists() {
+            std::process::Command::new(&user_path_1).spawn()
+        } else if std::path::Path::new(&user_path_2).exists() {
+            std::process::Command::new(&user_path_2).spawn()
+        } else {
+            // Fallback to the traditional admin installation path
+            std::process::Command::new(system_path).spawn()
+        }
+    };
 
     #[cfg(target_os = "macos")]
     let launch_result = Command::new("open").arg("-a").arg("Docker").spawn();
