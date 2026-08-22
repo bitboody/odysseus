@@ -210,7 +210,7 @@ use super::*;
             }
         }
 
-        let env_example_path = format!("{}\\.env.example", target_dir);
+        let env_example_path = format!("{}\\.env.example-desktop", target_dir);
         let env_path = format!("{}\\.env", target_dir);
         if !std::path::Path::new(&env_path).exists() {
             match std::fs::copy(&env_example_path, &env_path) {
