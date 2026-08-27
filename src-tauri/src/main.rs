@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-use std::path::Path;
+use std::path::PathBuf;
 
 fn main() {
     let is_installed = check_installation_state(check_os());
@@ -12,20 +12,19 @@ fn check_os() -> &'static str {
 }
 
 fn check_installation_state(os: &str) -> bool {
-    let config_file_path = match os {
-        "windows" => std::env::var("USERPROFILE")
-            .ok()
-            .map(|val| format!("{}\\Documents\\Odysseus Desktop\\config.json", val)),
-        "macos" | "linux" => std::env::var("HOME")
-            .ok()
-            .map(|val| format!("{}/Documents/Odysseus Desktop/config.json", val)),
-        _ => None,
+    let home_var = match os {
+        "windows" => "USERPROFILE",
+        "macos" | "linux" => "HOME",
+        _ => return false,
     };
 
-    if let Some(path_str) = config_file_path {
-        // Ensures it exists AND is specifically a file, not just an empty directory
-        Path::new(&path_str).is_file()
-    } else {
-        false
-    }
+    std::env::var_os(home_var)
+        .map(|home| {
+            PathBuf::from(home)
+                .join("Documents")
+                .join("Odysseus Desktop")
+                .join("config.json")
+                .is_file()
+        })
+        .unwrap_or(false)
 }

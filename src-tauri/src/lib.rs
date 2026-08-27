@@ -3,8 +3,20 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{Manager, Url};
+
+const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
+
+fn status_url(page: &str) -> Url {
+    #[cfg(target_os = "windows")]
+    let prefix = "http://odysseus.localhost/";
+
+    #[cfg(not(target_os = "windows"))]
+    let prefix = "odysseus://localhost/";
+
+    Url::parse(&format!("{prefix}{page}")).expect("status page URL must be valid")
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(is_installed: bool) {
@@ -44,46 +56,43 @@ pub fn run(is_installed: bool) {
             let app_handle = app.handle().clone();
             let window = app_handle.get_webview_window("main").unwrap();
 
-            #[cfg(target_os = "windows")]
-            let initial_url = if is_installed {
-                "http://odysseus.localhost/loading"
-            } else {
-                "http://odysseus.localhost/installer"
-            };
-
-            #[cfg(not(target_os = "windows"))]
-            let initial_url = if is_installed {
-                "odysseus://localhost/loading"
-            } else {
-                "odysseus://localhost/installer"
-            };
-
-            let _ = window.navigate(Url::parse(initial_url).unwrap());
+            let initial_page = if is_installed { "loading" } else { "installer" };
+            let _ = window.navigate(status_url(initial_page));
 
             if is_installed {
                 println!("Odysseus is installed. Spinning up background services...");
 
                 std::thread::spawn(move || {
-                    run_odysseus();
+                    if let Err(error) = run_odysseus() {
+                        println!("Could not start Odysseus: {error}");
+                        if let Some(thread_window) =
+                            app_handle.get_webview_window("main")
+                        {
+                            let _ = thread_window.navigate(status_url("error"));
+                        }
+                        return;
+                    }
 
                     println!("Polling for localhost:7000 to serve HTTP 200...");
                     let addr: SocketAddr = "127.0.0.1:7000".parse().unwrap();
+                    let deadline = Instant::now() + BACKEND_STARTUP_TIMEOUT;
+                    let mut backend_ready = false;
 
-                    loop {
+                    while Instant::now() < deadline {
                         if let Ok(mut stream) =
                             TcpStream::connect_timeout(&addr, Duration::from_millis(500))
                         {
                             let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-                            
+
                             let request =
                                 "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
 
                             if stream.write_all(request.as_bytes()).is_ok() {
                                 let mut buffer = [0; 1024];
-                                
+
                                 if let Ok(bytes_read) = stream.read(&mut buffer) {
                                     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
-                                    
+
                                     let first_line = response.lines().next().unwrap_or("Empty Response");
                                     println!("Pinged localhost:7000. Server replied: {}", first_line);
 
@@ -96,11 +105,15 @@ pub fn run(is_installed: bool) {
                                             "Server is fully booted and responsive! Navigating to live app..."
                                         );
 
-                                        let thread_window =
-                                            app_handle.get_webview_window("main").unwrap();
-                                        let _ = thread_window
-                                            .navigate(Url::parse("http://localhost:7000").unwrap());
+                                        if let Some(thread_window) =
+                                            app_handle.get_webview_window("main")
+                                        {
+                                            let _ = thread_window.navigate(
+                                                Url::parse("http://localhost:7000").unwrap(),
+                                            );
+                                        }
 
+                                        backend_ready = true;
                                         break;
                                     }
                                 } else {
@@ -112,6 +125,18 @@ pub fn run(is_installed: bool) {
                         }
 
                         thread::sleep(Duration::from_millis(1000));
+                    }
+
+                    if !backend_ready {
+                        println!(
+                            "Odysseus did not become responsive within {:?}.",
+                            BACKEND_STARTUP_TIMEOUT
+                        );
+                        if let Some(thread_window) =
+                            app_handle.get_webview_window("main")
+                        {
+                            let _ = thread_window.navigate(status_url("error"));
+                        }
                     }
 
                 });
@@ -133,7 +158,7 @@ pub fn run(is_installed: bool) {
             _ => {}
         })
         // Point the handler to the module namespace
-        .invoke_handler(tauri::generate_handler![commands::windows_installation_script])
+        .invoke_handler(tauri::generate_handler![commands::installation_script])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -145,34 +170,16 @@ use super::*;
 
     #[tauri::command]
     pub fn check_installation_status() -> bool {
-        let config_path = PathBuf::from(get_config_dir()).join("config.json");
+        let config_path = get_config_dir().join("config.json");
         config_path.exists()
     }
 
     #[tauri::command]
-    pub async fn windows_installation_script() -> (String, bool) {
-        let is_admin = is_admin();
-        if !is_admin {
-            return (
-                "Administrative privileges are required to run the installer.".to_string(),
-                false,
-            );
-        }
-
+    pub async fn installation_script() -> (String, bool) {
         match run_system_command("git", &["--version"]) {
             Ok(output) => println!("Found Git: {}", output.trim()),
             Err(_) => {
-                println!("Git not found. Attempting to install via winget...");
-
-                let install_result = run_system_command(
-                    "winget",
-                    &[
-                        "install", "--id", "Git.Git", "-e", "--source", "winget",
-                        "--silent", "--accept-package-agreements", "--accept-source-agreements",
-                    ],
-                );
-
-                match install_result {
+                match install_git() {
                     Ok(_) => println!("Git installed successfully."),
                     Err(e) => {
                         return (
@@ -196,26 +203,49 @@ use super::*;
 
         let target_dir = get_odysseus_dir();
 
-        match run_system_command(
-            "git",
-            &["clone", "https://github.com/odysseus-dev/odysseus.git", &target_dir],
-        ) {
-            Ok(output) => println!("Git repository cloned successfully: {}", output.trim()),
-            Err(e) => {
-                if std::path::Path::new(&target_dir).exists() {
-                    println!("Directory already exists, skipping clone and proceeding.");
-                } else {
-                    return (format!("Failed to clone repository: {e}"), false);
-                }
-            }
+        if target_dir.exists() {
+            return (
+                format!(
+                    "Installation directory already exists: {}. Refusing to run Docker Compose from it.",
+                    target_dir.display()
+                ),
+                false,
+            );
         }
 
-        let env_example_path = format!("{}\\.env.example-desktop", target_dir);
-        let env_path = format!("{}\\.env", target_dir);
-        if !std::path::Path::new(&env_path).exists() {
+        let clone_result = Command::new("git")
+            .args(["clone", "https://github.com/odysseus-dev/odysseus.git"])
+            .arg(&target_dir)
+            .output();
+
+        match clone_result {
+            Ok(output) if output.status.success() => println!(
+                "Git repository cloned successfully: {}",
+                String::from_utf8_lossy(&output.stdout).trim()
+            ),
+            Ok(output) => {
+                return (
+                    format!(
+                        "Failed to clone repository: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    ),
+                    false,
+                )
+            }
+            Err(e) => return (format!("Failed to execute git clone: {e}"), false),
+        }
+
+        let env_example_path = target_dir.join(".env.example-desktop");
+        let env_path = target_dir.join(".env");
+        if !env_path.exists() {
             match std::fs::copy(&env_example_path, &env_path) {
                 Ok(_) => println!("Successfully created .env file."),
-                Err(e) => println!("Warning: Could not copy .env.example: {}", e),
+                Err(e) => {
+                    return (
+                        format!("Could not create the Odysseus environment file: {e}"),
+                        false,
+                    )
+                }
             }
         }
 
@@ -249,20 +279,27 @@ use super::*;
 
         // Write config.json into Documents/Odysseus Desktop/config.json
         let config_dir = get_config_dir();
-        let _ = std::fs::create_dir_all(&config_dir);
+        if let Err(e) = std::fs::create_dir_all(&config_dir) {
+            return (
+                format!("Could not create the installation marker directory: {e}"),
+                false,
+            );
+        }
 
-        let config_path = PathBuf::from(&config_dir).join("config.json");
+        let config_path = config_dir.join("config.json");
         let config_content = "{\n  \"installed\": true\n}\n";
 
         if let Err(e) = std::fs::write(&config_path, config_content) {
-            println!("Warning: Could not create config.json: {}", e);
-        } else {
-            println!("Successfully created config.json at {:?}", config_path);
+            return (
+                format!("Could not create the installation marker: {e}"),
+                false,
+            );
         }
+        println!("Successfully created config.json at {:?}", config_path);
 
-        println!("Windows installation script executed successfully.");
+        println!("Odysseus installation script executed successfully.");
         (
-            "Windows installation script executed successfully.".to_string(),
+            "Odysseus installation script executed successfully.".to_string(),
             true,
         )
     }
@@ -273,13 +310,19 @@ use super::*;
 // ---------------------------------------------------------
 
 #[cfg(target_os = "windows")]
-fn is_admin() -> bool {
-    is_elevated::is_elevated()
+fn install_git() -> Result<String, String> {
+    run_system_command(
+        "winget",
+        &[
+            "install", "--id", "Git.Git", "-e", "--source", "winget", "--silent",
+            "--accept-package-agreements", "--accept-source-agreements",
+        ],
+    )
 }
 
-#[cfg(target_family = "unix")]
-fn is_admin() -> bool {
-    unsafe { libc::geteuid() == 0 }
+#[cfg(not(target_os = "windows"))]
+fn install_git() -> Result<String, String> {
+    Err("Git is not installed. Install Git with your platform package manager and retry.".to_string())
 }
 
 fn ensure_docker_is_running() -> Result<(), String> {
@@ -340,11 +383,8 @@ fn ensure_docker_is_running() -> Result<(), String> {
     Err("Docker daemon took too long to start. Please check Docker Desktop manually.".to_string())
 }
 
-fn run_odysseus() {
-    if let Err(e) = ensure_docker_is_running() {
-        println!("Error: {}", e);
-        return; 
-    }
+fn run_odysseus() -> Result<(), String> {
+    ensure_docker_is_running()?;
 
     match run_system_command("docker", &["ps"]) {
         Ok(output) => {
@@ -361,13 +401,20 @@ fn run_odysseus() {
 
                 match result {
                     Ok(out) if out.status.success() => println!("Odysseus started successfully."),
-                    Ok(out) => println!("Failed to start Odysseus: {}", String::from_utf8_lossy(&out.stderr)),
-                    Err(e) => println!("Failed to execute docker command: {}", e),
+                    Ok(out) => {
+                        return Err(format!(
+                            "Failed to start Odysseus: {}",
+                            String::from_utf8_lossy(&out.stderr).trim()
+                        ))
+                    }
+                    Err(e) => return Err(format!("Failed to execute docker command: {e}")),
                 }
             }
         }
-        Err(_) => println!("Unexpected error checking docker ps."),
+        Err(e) => return Err(format!("Could not inspect Docker containers: {e}")),
     }
+
+    Ok(())
 }
 
 fn close_odysseus() {
@@ -400,30 +447,22 @@ fn close_odysseus() {
     }
 }
 
-fn get_odysseus_dir() -> String {
+fn get_documents_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
-    let base_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+    let base_dir = std::env::var_os("USERPROFILE").unwrap_or_else(|| "C:\\".into());
 
     #[cfg(not(target_os = "windows"))]
-    let base_dir = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    let base_dir = std::env::var_os("HOME").unwrap_or_else(|| "/".into());
 
-    let mut path = PathBuf::from(base_dir);
-    path.push("Documents");
-    path.push("Odysseus");
-    path.to_string_lossy().to_string()
+    PathBuf::from(base_dir).join("Documents")
 }
 
-fn get_config_dir() -> String {
-    #[cfg(target_os = "windows")]
-    let base_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\".to_string());
+fn get_odysseus_dir() -> PathBuf {
+    get_documents_dir().join("Odysseus")
+}
 
-    #[cfg(not(target_os = "windows"))]
-    let base_dir = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-
-    let mut path = PathBuf::from(base_dir);
-    path.push("Documents");
-    path.push("Odysseus Desktop");
-    path.to_string_lossy().to_string()
+fn get_config_dir() -> PathBuf {
+    get_documents_dir().join("Odysseus Desktop")
 }
 
 fn run_system_command(cmd: &str, args: &[&str]) -> Result<String, String> {
