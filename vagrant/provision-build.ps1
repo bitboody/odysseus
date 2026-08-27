@@ -144,7 +144,7 @@ Get-ChildItem -Path $DeployDir | Get-FileHash -Algorithm SHA256 |
     Out-File -FilePath "$DeployDir\checksums.sha256"
 
 # -----------------------------------------------------------------
-# 10. Place shortcut on the test user's desktop
+# 9. Place shortcut on the test user's desktop
 # -----------------------------------------------------------------
 $desktop = "C:\Users\$TestUser\Desktop"
 New-Item -ItemType Directory -Force -Path $desktop | Out-Null
