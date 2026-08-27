@@ -108,16 +108,7 @@ Write-Host "[*] Cloning '$RepoBranch' branch from '$RepoUrl'..."
 if ($LASTEXITCODE -ne 0) { throw "Git clone failed." }
 
 # -----------------------------------------------------------------
-# 7. Placeholder dist/ so tauri build succeeds
-# -----------------------------------------------------------------
-$distDir = "$CloneDir\dist"
-if (-not (Test-Path $distDir)) {
-    New-Item -ItemType Directory -Force -Path $distDir | Out-Null
-    '<!DOCTYPE html><html><head><title>Odysseus</title></head><body></body></html>' | Out-File -FilePath "$distDir\index.html" -Encoding utf8 -NoNewline
-}
-
-# -----------------------------------------------------------------
-# 8. Build release binary + NSIS installer
+# 7. Build release binary + NSIS installer
 # -----------------------------------------------------------------
 Push-Location "$CloneDir\src-tauri"
 try {
@@ -129,7 +120,7 @@ try {
 }
 
 # -----------------------------------------------------------------
-# 9. Stage artefacts
+# 8. Stage artefacts
 # -----------------------------------------------------------------
 $releaseDir = "$CloneDir\src-tauri\target\x86_64-pc-windows-msvc\release"
 New-Item -ItemType Directory -Force -Path $DeployDir | Out-Null

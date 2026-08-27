@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "identifier": "com.odysseus.dev",
   "build": {
-    "frontendDist": "../dist",
+    "frontendDist": "../static",
     "devUrl": "http://localhost:7000"
   },
   "app": {
