@@ -1,12 +1,18 @@
+use std::env;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::LazyLock;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Url};
 
 const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
+pub static PORT: LazyLock<String> = LazyLock::new(|| {
+    dotenv::from_path(get_odysseus_dir().join(".env")).ok();
+    env::var("APP_PORT").unwrap_or_else(|_| "7000".to_string())
+});
 
 fn status_url(page: &str) -> Url {
     #[cfg(target_os = "windows")]
@@ -73,8 +79,8 @@ pub fn run(is_installed: bool) {
                         return;
                     }
 
-                    println!("Polling for localhost:7000 to serve HTTP 200...");
-                    let addr: SocketAddr = "127.0.0.1:7000".parse().unwrap();
+                    println!("Polling for localhost:{} to serve HTTP 200...", *PORT);
+                    let addr: SocketAddr = format!("127.0.0.1:{}", *PORT).parse().unwrap();
                     let deadline = Instant::now() + BACKEND_STARTUP_TIMEOUT;
                     let mut backend_ready = false;
 
@@ -94,7 +100,7 @@ pub fn run(is_installed: bool) {
                                     let response = String::from_utf8_lossy(&buffer[..bytes_read]);
 
                                     let first_line = response.lines().next().unwrap_or("Empty Response");
-                                    println!("Pinged localhost:7000. Server replied: {}", first_line);
+                                    println!("Pinged localhost:{}. Server replied: {}", *PORT, first_line);
 
                                     if first_line.starts_with("HTTP/1.1 20")
                                         || first_line.starts_with("HTTP/1.0 20")
@@ -109,7 +115,8 @@ pub fn run(is_installed: bool) {
                                             app_handle.get_webview_window("main")
                                         {
                                             let _ = thread_window.navigate(
-                                                Url::parse("http://localhost:7000").unwrap(),
+                                                Url::parse(&format!("http://localhost:{}", *PORT))
+                                                    .unwrap(),
                                             );
                                         }
 
@@ -121,7 +128,7 @@ pub fn run(is_installed: bool) {
                                 }
                             }
                         } else {
-                            println!("Waiting for port 7000 to open...");
+                            println!("Waiting for port {} to open...", *PORT);
                         }
 
                         thread::sleep(Duration::from_millis(1000));
@@ -166,7 +173,7 @@ pub fn run(is_installed: bool) {
 pub mod commands {
     use tauri::utils::config;
 
-use super::*;
+    use super::*;
 
     #[tauri::command]
     pub fn check_installation_status() -> bool {
@@ -178,17 +185,15 @@ use super::*;
     pub async fn installation_script() -> (String, bool) {
         match run_system_command("git", &["--version"]) {
             Ok(output) => println!("Found Git: {}", output.trim()),
-            Err(_) => {
-                match install_git() {
-                    Ok(_) => println!("Git installed successfully."),
-                    Err(e) => {
-                        return (
-                            format!("Git is not installed, and automated installation failed: {e}"),
-                            false,
-                        );
-                    }
+            Err(_) => match install_git() {
+                Ok(_) => println!("Git installed successfully."),
+                Err(e) => {
+                    return (
+                        format!("Git is not installed, and automated installation failed: {e}"),
+                        false,
+                    );
                 }
-            }
+            },
         }
 
         match run_system_command("docker", &["info"]) {
@@ -253,13 +258,18 @@ use super::*;
         let build_status = Command::new("docker")
             .current_dir(&target_dir)
             .args(["compose", "build", "--build-arg", "INSTALL_OPTIONAL=true"])
-            .stdout(Stdio::inherit()) 
-            .stderr(Stdio::inherit()) 
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .status();
 
         match build_status {
             Ok(status) if status.success() => println!("Build successful!"),
-            Ok(status) => return (format!("Docker build failed with status: {}", status), false),
+            Ok(status) => {
+                return (
+                    format!("Docker build failed with status: {}", status),
+                    false,
+                )
+            }
             Err(e) => return (format!("Failed to execute docker build: {}", e), false),
         }
 
@@ -273,7 +283,12 @@ use super::*;
 
         match up_status {
             Ok(status) if status.success() => println!("Docker compose up executed successfully!"),
-            Ok(status) => return (format!("Docker compose up failed with status: {}", status), false),
+            Ok(status) => {
+                return (
+                    format!("Docker compose up failed with status: {}", status),
+                    false,
+                )
+            }
             Err(e) => return (format!("Failed to execute docker up command: {}", e), false),
         }
 
@@ -314,15 +329,25 @@ fn install_git() -> Result<String, String> {
     run_system_command(
         "winget",
         &[
-            "install", "--id", "Git.Git", "-e", "--source", "winget", "--silent",
-            "--accept-package-agreements", "--accept-source-agreements",
+            "install",
+            "--id",
+            "Git.Git",
+            "-e",
+            "--source",
+            "winget",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
         ],
     )
 }
 
 #[cfg(not(target_os = "windows"))]
 fn install_git() -> Result<String, String> {
-    Err("Git is not installed. Install Git with your platform package manager and retry.".to_string())
+    Err(
+        "Git is not installed. Install Git with your platform package manager and retry."
+            .to_string(),
+    )
 }
 
 fn ensure_docker_is_running() -> Result<(), String> {
@@ -367,7 +392,7 @@ fn ensure_docker_is_running() -> Result<(), String> {
         return Err(format!("Could not launch Docker automatically: {}", e));
     }
 
-    let max_retries = 30; 
+    let max_retries = 30;
     for attempt in 1..=max_retries {
         if run_system_command("docker", &["info"]).is_ok() {
             println!("Docker daemon is now online and ready!");
@@ -438,7 +463,10 @@ fn close_odysseus() {
 
                 match result {
                     Ok(out) if out.status.success() => println!("Odysseus stopped successfully."),
-                    Ok(out) => println!("Failed to stop Odysseus: {}", String::from_utf8_lossy(&out.stderr)),
+                    Ok(out) => println!(
+                        "Failed to stop Odysseus: {}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ),
                     Err(e) => println!("Failed to execute docker command: {}", e),
                 }
             }
