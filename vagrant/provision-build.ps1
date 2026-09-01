@@ -6,13 +6,15 @@
     Every input this build depends on is pinned by the Vagrantfile and asserted
     here before it is used:
 
-      1. Chocolatey client and package versions, installed with --require-checksums.
+      1. Chocolatey client and package versions, installed with
+         --require-checksums where upstream publishes them (see $checksumExempt).
       2. The rustup installer, verified by SHA-256, and an exact Rust toolchain.
       3. The WebView2 bootstrapper, verified by Authenticode publisher.
       4. An exact tauri-cli version, installed with --locked.
       5. The source commit, fetched by object id and re-read from the checkout.
       6. The frontend entry that tauri.conf.json points at.
-      7. The NSIS installer this harness advertises.
+      7. The MSVC toolset, via vswhere, before the build is attempted.
+      8. The NSIS installer this harness advertises.
 
     Any mismatch throws and provisioning fails. On success the script writes
     C:\OdysseusBuild\build-receipt.json recording every identity above plus the

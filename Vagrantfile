@@ -44,8 +44,11 @@ BOX_SHA256 = "a85862d5d7541785e9ace7ff33498865f2ea035b79c5cce72aabf980c7c26153"
 
 # Source under test. A full 40-character commit SHA is required; a branch name
 # is rejected by the provisioner because it does not pin anything.
+# This names the most recent commit that changes buildable source. Commits that
+# only touch this file or vagrant/ sit on top of it without changing what gets
+# compiled, so the pin does not need to chase them.
 SOURCE_REPO   = "https://github.com/bitboody/odysseus.git"
-SOURCE_COMMIT = "8001b1c28b0780d82c0ac5ba15147e4670e1ac28"
+SOURCE_COMMIT = "df2adab248b78a12c5eb25db79dbd8b63274a907"
 
 # Rust toolchain. RUSTUP_SHA256 is the digest published alongside the installer
 # at static.rust-lang.org/rustup/archive/<version>/.
