@@ -8,6 +8,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Url};
 
+mod platform;
+
 const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
 pub static PORT: LazyLock<String> = LazyLock::new(|| {
     dotenv::from_path(get_odysseus_dir().join(".env")).ok();
@@ -185,7 +187,7 @@ pub mod commands {
     pub async fn installation_script() -> (String, bool) {
         match run_system_command("git", &["--version"]) {
             Ok(output) => println!("Found Git: {}", output.trim()),
-            Err(_) => match install_git() {
+            Err(_) => match platform::install_git() {
                 Ok(_) => println!("Git installed successfully."),
                 Err(e) => {
                     return (
@@ -324,32 +326,6 @@ pub mod commands {
 // HELPER FUNCTIONS
 // ---------------------------------------------------------
 
-#[cfg(target_os = "windows")]
-fn install_git() -> Result<String, String> {
-    run_system_command(
-        "winget",
-        &[
-            "install",
-            "--id",
-            "Git.Git",
-            "-e",
-            "--source",
-            "winget",
-            "--silent",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-        ],
-    )
-}
-
-#[cfg(not(target_os = "windows"))]
-fn install_git() -> Result<String, String> {
-    Err(
-        "Git is not installed. Install Git with your platform package manager and retry."
-            .to_string(),
-    )
-}
-
 fn ensure_docker_is_running() -> Result<(), String> {
     if run_system_command("docker", &["info"]).is_ok() {
         return Ok(());
@@ -357,36 +333,7 @@ fn ensure_docker_is_running() -> Result<(), String> {
 
     println!("Docker daemon is offline. Attempting to launch Docker Desktop...");
 
-    #[cfg(target_os = "windows")]
-    let launch_result = {
-        let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\".to_string());
-
-        let user_path_1 = format!(
-            "{}\\Programs\\DockerDesktop\\Docker Desktop.exe",
-            local_app_data
-        );
-        let user_path_2 = format!(
-            "{}\\Programs\\Docker\\Docker\\Docker Desktop.exe",
-            local_app_data
-        );
-        let system_path = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
-
-        if std::path::Path::new(&user_path_1).exists() {
-            std::process::Command::new(&user_path_1).spawn()
-        } else if std::path::Path::new(&user_path_2).exists() {
-            std::process::Command::new(&user_path_2).spawn()
-        } else {
-            std::process::Command::new(system_path).spawn()
-        }
-    };
-
-    #[cfg(target_os = "macos")]
-    let launch_result = Command::new("open").arg("-a").arg("Docker").spawn();
-
-    #[cfg(target_os = "linux")]
-    let launch_result = Command::new("sudo")
-        .args(&["systemctl", "start", "docker"])
-        .spawn();
+    let launch_result = platform::launch_docker_desktop();
 
     if let Err(e) = launch_result {
         return Err(format!("Could not launch Docker automatically: {}", e));
@@ -493,7 +440,7 @@ fn get_config_dir() -> PathBuf {
     get_documents_dir().join("Odysseus Desktop")
 }
 
-fn run_system_command(cmd: &str, args: &[&str]) -> Result<String, String> {
+pub(crate) fn run_system_command(cmd: &str, args: &[&str]) -> Result<String, String> {
     let output = Command::new(cmd)
         .args(args)
         .output()
