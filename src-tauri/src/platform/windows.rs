@@ -1,4 +1,5 @@
-use std::process::{Child, Command};
+use std::path::Path;
+use std::process::Command;
 
 use crate::run_system_command;
 
@@ -19,24 +20,31 @@ pub fn install_git() -> Result<String, String> {
     )
 }
 
-pub fn launch_docker_desktop() -> std::io::Result<Child> {
+pub fn launch_docker_desktop() -> Result<(), String> {
     let local_app_data = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| "C:\\".to_string());
 
-    let user_path_1 = format!(
-        "{}\\Programs\\DockerDesktop\\Docker Desktop.exe",
-        local_app_data
-    );
-    let user_path_2 = format!(
-        "{}\\Programs\\Docker\\Docker\\Docker Desktop.exe",
-        local_app_data
-    );
-    let system_path = "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe";
+    let candidate_paths = [
+        format!(
+            "{}\\Programs\\DockerDesktop\\Docker Desktop.exe",
+            local_app_data
+        ),
+        format!(
+            "{}\\Programs\\Docker\\Docker\\Docker Desktop.exe",
+            local_app_data
+        ),
+        "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe".to_string(),
+    ];
 
-    if std::path::Path::new(&user_path_1).exists() {
-        Command::new(&user_path_1).spawn()
-    } else if std::path::Path::new(&user_path_2).exists() {
-        Command::new(&user_path_2).spawn()
-    } else {
-        Command::new(system_path).spawn()
-    }
+    let exe_path = candidate_paths
+        .iter()
+        .find(|path| Path::new(path).exists())
+        .ok_or_else(|| {
+            "Docker Desktop was not found. Install it from https://www.docker.com/products/docker-desktop/ and retry."
+                .to_string()
+        })?;
+
+    Command::new(exe_path)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Failed to launch Docker Desktop: {e}"))
 }

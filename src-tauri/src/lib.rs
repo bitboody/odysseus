@@ -333,11 +333,8 @@ fn ensure_docker_is_running() -> Result<(), String> {
 
     println!("Docker daemon is offline. Attempting to launch Docker Desktop...");
 
-    let launch_result = platform::launch_docker_desktop();
-
-    if let Err(e) = launch_result {
-        return Err(format!("Could not launch Docker automatically: {}", e));
-    }
+    platform::launch_docker_desktop()
+        .map_err(|e| format!("Could not launch Docker automatically: {}", e))?;
 
     let max_retries = 30;
     for attempt in 1..=max_retries {
