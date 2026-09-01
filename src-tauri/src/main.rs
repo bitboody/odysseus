@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
@@ -18,13 +19,24 @@ fn check_installation_state(os: &str) -> bool {
         _ => return false,
     };
 
-    std::env::var_os(home_var)
-        .map(|home| {
-            PathBuf::from(home)
-                .join("Documents")
-                .join("Odysseus Desktop")
-                .join("config.json")
-                .is_file()
-        })
+    let Some(home) = std::env::var_os(home_var) else {
+        return false;
+    };
+
+    let config_path = PathBuf::from(home)
+        .join("Documents")
+        .join("Odysseus Desktop")
+        .join("config.json");
+
+    let Ok(config_file) = fs::File::open(&config_path) else {
+        return false;
+    };
+
+    let config_json: serde_json::Value =
+        serde_json::from_reader(config_file).unwrap_or(serde_json::Value::Null);
+
+    config_json
+        .get("installed")
+        .and_then(|v| v.as_bool())
         .unwrap_or(false)
 }
