@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::LazyLock;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -11,6 +12,8 @@ use tauri::{Manager, Url};
 mod platform;
 
 const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
+// Tracks the installer's "Install native instead of Docker" checkbox state.
+static NATIVE_INSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 pub static PORT: LazyLock<String> = LazyLock::new(|| {
     dotenv::from_path(get_odysseus_dir().join(".env")).ok();
     env::var("APP_PORT").unwrap_or_else(|_| "7000".to_string())
@@ -167,7 +170,10 @@ pub fn run(is_installed: bool) {
             _ => {}
         })
         // Point the handler to the module namespace
-        .invoke_handler(tauri::generate_handler![commands::installation_script])
+        .invoke_handler(tauri::generate_handler![
+            commands::installation_script,
+            commands::is_checked_native
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -181,6 +187,13 @@ pub mod commands {
     pub fn check_installation_status() -> bool {
         let config_path = get_config_dir().join("config.json");
         config_path.exists()
+    }
+
+    /// Records the installer's "native instead of Docker" checkbox state and echoes it back.
+    #[tauri::command]
+    pub fn is_checked_native(checked: bool) -> bool {
+        NATIVE_INSTALL_REQUESTED.store(checked, Ordering::SeqCst);
+        checked
     }
 
     #[tauri::command]
