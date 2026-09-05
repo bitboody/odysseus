@@ -46,6 +46,52 @@
         </div>
       </div>
     </div>
+
+    <div id="info-modal-overlay" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h2>System Requirements</h2>
+        <p class="lead">
+          Odysseus runs in Docker by default. Here's what each OS needs to
+          run it, plus a couple of platform-specific quirks worth knowing
+          about up front.
+        </p>
+
+        <h3>Windows</h3>
+        <ul class="feature-list">
+          <li>Windows 10/11, 64-bit</li>
+          <li>WSL2 enabled — Docker Desktop uses it as the Linux backend</li>
+          <li>Virtualization enabled in BIOS/UEFI (Intel VT-x or AMD-V)</li>
+          <li>Docker Desktop installed and running</li>
+          <li>At least 4 GB RAM allocated to Docker (8 GB+ recommended)</li>
+        </ul>
+
+        <h3>macOS</h3>
+        <ul class="feature-list">
+          <li>Docker Desktop for Mac installed and running</li>
+          <li>Apple Silicon (M-series): Docker can't reach the Metal GPU, so local model serving runs on CPU only inside the container</li>
+          <li>At least 4 GB RAM allocated to Docker</li>
+        </ul>
+
+        <h3>Linux</h3>
+        <ul class="feature-list">
+          <li>Docker Engine plus the Compose plugin</li>
+          <li>Your user added to the docker group (or run with sudo)</li>
+          <li>NVIDIA Container Toolkit or ROCm for GPU passthrough (optional)</li>
+        </ul>
+
+        <p class="lead">
+          All platforms also need Git and about 800 MB of free disk space for
+          the image and container data.
+        </p>
+
+        <div class="cta-row">
+          <button id="modal-close-button" class="primary-action" type="button">
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script>
       // Access Tauri API globally instead of using 'import'
       // Note: Use window.__TAURI__.invoke if you are on Tauri v1
@@ -56,6 +102,8 @@
       const installationMessage = document.getElementById(
         "installation-message",
       );
+      const infoModalOverlay = document.getElementById("info-modal-overlay");
+      const modalCloseButton = document.getElementById("modal-close-button");
 
       installButton?.addEventListener("click", async () => {
         if (installButton.disabled) return;
@@ -95,7 +143,17 @@
       });
 
       learnMoreButton?.addEventListener("click", () => {
-        window.open("https://odysseus-dev.github.io/odysseus/", "_blank");
+        infoModalOverlay?.classList.remove("hidden");
+      });
+
+      modalCloseButton?.addEventListener("click", () => {
+        infoModalOverlay?.classList.add("hidden");
+      });
+
+      infoModalOverlay?.addEventListener("click", (event) => {
+        if (event.target === infoModalOverlay) {
+          infoModalOverlay.classList.add("hidden");
+        }
       });
     </script>
   </body>
