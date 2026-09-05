@@ -3,7 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="stylesheet" href="tauri-style.css" />
     <title>Odysseus — Installer</title>
   </head>
   <body>
@@ -30,11 +29,6 @@
           <li>Secure app data and settings</li>
         </ul>
 
-        <label class="checkbox-row" for="native-install-checkbox">
-          <input type="checkbox" id="native-install-checkbox" />
-          Install native instead of Docker
-        </label>
-
         <div class="cta-row">
           <button id="install-button" class="primary-action" type="button">
             Install
@@ -52,40 +46,6 @@
         </div>
       </div>
     </div>
-
-    <div id="info-modal-overlay" class="modal-overlay hidden">
-      <div class="modal-card">
-        <h2>Docker vs. Native Install</h2>
-        <p class="lead">
-          By default, Odysseus runs inside Docker: an isolated container that
-          bundles the app together with the exact versions of every
-          dependency it needs. This keeps Odysseus from conflicting with
-          other software on your machine and gives you a consistent,
-          reproducible environment on every platform.
-        </p>
-        <p class="lead">
-          A native install runs Odysseus directly on your system, using
-          whatever Python, Node, and system libraries are already installed.
-          It's usually faster to install since there's no container image to
-          pull or build.
-        </p>
-        <h3>Downsides of a native install</h3>
-        <ul class="feature-list">
-          <li>No isolation — dependencies can conflict with other apps</li>
-          <li>You're responsible for keeping runtime versions compatible</li>
-          <li>Harder to fully clean up, since files are spread across the system</li>
-          <li>Platform-specific bugs are more likely to occur</li>
-          <li>Updates may require reinstalling dependencies by hand</li>
-          <li>Some features may not work correctly outside a Docker environment</li>
-        </ul>
-        <div class="cta-row">
-          <button id="modal-close-button" class="primary-action" type="button">
-            Got it
-          </button>
-        </div>
-      </div>
-    </div>
-
     <script>
       // Access Tauri API globally instead of using 'import'
       // Note: Use window.__TAURI__.invoke if you are on Tauri v1
@@ -96,17 +56,6 @@
       const installationMessage = document.getElementById(
         "installation-message",
       );
-      const nativeInstallCheckbox = document.getElementById(
-        "native-install-checkbox",
-      );
-      const infoModalOverlay = document.getElementById("info-modal-overlay");
-      const modalCloseButton = document.getElementById("modal-close-button");
-
-      nativeInstallCheckbox?.addEventListener("change", () => {
-        invoke("is_checked_native", { checked: nativeInstallCheckbox.checked }).catch(
-          (error) => console.error("Error updating native install flag:", error),
-        );
-      });
 
       installButton?.addEventListener("click", async () => {
         if (installButton.disabled) return;
@@ -146,17 +95,7 @@
       });
 
       learnMoreButton?.addEventListener("click", () => {
-        infoModalOverlay?.classList.remove("hidden");
-      });
-
-      modalCloseButton?.addEventListener("click", () => {
-        infoModalOverlay?.classList.add("hidden");
-      });
-
-      infoModalOverlay?.addEventListener("click", (event) => {
-        if (event.target === infoModalOverlay) {
-          infoModalOverlay.classList.add("hidden");
-        }
+        window.open("https://odysseus-dev.github.io/odysseus/", "_blank");
       });
     </script>
   </body>
