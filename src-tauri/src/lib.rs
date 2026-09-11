@@ -167,7 +167,10 @@ pub fn run(is_installed: bool) {
             _ => {}
         })
         // Point the handler to the module namespace
-        .invoke_handler(tauri::generate_handler![commands::installation_script])
+        .invoke_handler(tauri::generate_handler![
+            commands::installation_script,
+            commands::check_installation_status
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -177,14 +180,9 @@ pub mod commands {
 
     use super::*;
 
+    // Verifies (and attempts to auto-fix) the prerequisites the install script depends on.
     #[tauri::command]
-    pub fn check_installation_status() -> bool {
-        let config_path = get_config_dir().join("config.json");
-        config_path.exists()
-    }
-
-    #[tauri::command]
-    pub async fn installation_script() -> (String, bool) {
+    pub fn check_installation_status() -> (String, bool) {
         match run_system_command("git", &["--version"]) {
             Ok(output) => println!("Found Git: {}", output.trim()),
             Err(_) => match platform::install_git() {
@@ -198,14 +196,18 @@ pub mod commands {
             },
         }
 
-        match run_system_command("docker", &["info"]) {
-            Ok(_) => println!("Docker CLI found and Engine is running."),
-            Err(_) => {
-                return (
-                    "Docker is not running. Please open Docker Desktop and try again.".to_string(),
-                    false,
-                );
-            }
+        if let Err(e) = ensure_docker_is_running() {
+            return (format!("Could not start Docker: {e}"), false);
+        }
+
+        (String::new(), true)
+    }
+
+    #[tauri::command]
+    pub async fn installation_script() -> (String, bool) {
+        let (message, ready) = check_installation_status();
+        if !ready {
+            return (message, false);
         }
 
         let target_dir = get_odysseus_dir();
