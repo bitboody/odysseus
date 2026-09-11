@@ -31,9 +31,39 @@ pub fn install_git() -> Result<String, String> {
 
 pub fn launch_docker_desktop() -> Result<(), String> {
     if run_system_command("which", &["docker"]).is_err() {
-        return Err(
-            "Docker was not found. Install Docker Engine for your distro and retry.".to_string(),
-        );
+        // wmdocker is just a systray icon, not the Docker engine — install the real package per distro.
+        let package_managers: [(&str, &[&str]); 3] = [
+            ("apt-get", &["install", "-y", "docker.io"]),
+            ("dnf", &["install", "-y", "docker"]),
+            ("pacman", &["-S", "--noconfirm", "docker"]),
+        ];
+
+        let installed = package_managers.iter().any(|(manager, _)| {
+            run_system_command("which", &[manager]).is_ok()
+        });
+
+        if !installed {
+            return Err(
+                "Docker is not installed and no supported package manager (apt-get, dnf, pacman) was found. Install Docker manually and retry."
+                    .to_string(),
+            );
+        }
+
+        for (manager, install_args) in package_managers {
+            if run_system_command("which", &[manager]).is_ok() {
+                // -n fails fast instead of hanging forever if a password is actually required.
+                let mut args = vec!["-n", manager];
+                args.extend_from_slice(install_args);
+
+                run_system_command("sudo", &args).map_err(|_| {
+                    format!(
+                        "Installing Docker requires a password we can't supply here. Run `sudo {manager} {}` in a terminal, then retry.",
+                        install_args.join(" ")
+                    )
+                })?;
+                break;
+            }
+        }
     }
 
     // -n fails fast instead of hanging forever if a password is actually required.
