@@ -29,6 +29,11 @@
           <li>Secure app data and settings</li>
         </ul>
 
+        <label class="native-toggle" for="native-install-checkbox">
+          <input type="checkbox" id="native-install-checkbox" />
+          <span>Install natively (no Docker required)</span>
+        </label>
+
         <div class="cta-row">
           <button id="install-button" class="primary-action" type="button">
             Install
@@ -55,6 +60,12 @@
           run it, plus a couple of platform-specific quirks worth knowing
           about up front.
         </p>
+
+        <h3>Docker vs. Native</h3>
+        <ul class="feature-list">
+          <li>Docker (default): Odysseus and its bundled services (ChromaDB, SearXNG, ntfy) run in isolated containers. Easiest to keep updated and removed cleanly; identical setup on every OS; requires Docker Desktop/Engine installed and running.</li>
+          <li>Native: Odysseus runs directly on this machine inside a Python virtual environment, no Docker required. Useful when Docker isn't available or wanted, or for full local GPU access on Apple Silicon. Requires Python 3.11+ on PATH, and bundled services like ChromaDB/SearXNG are not started automatically.</li>
+        </ul>
 
         <h3>Windows</h3>
         <ul class="feature-list">
@@ -104,6 +115,9 @@
       );
       const infoModalOverlay = document.getElementById("info-modal-overlay");
       const modalCloseButton = document.getElementById("modal-close-button");
+      const nativeInstallCheckbox = document.getElementById(
+        "native-install-checkbox",
+      );
 
       installButton?.addEventListener("click", async () => {
         if (installButton.disabled) return;
@@ -117,9 +131,9 @@
 
         try {
           // 2. Invoke the Rust command
-          const [message, success] = await invoke(
-            "installation_script",
-          );
+          const [message, success] = await invoke("installation_script", {
+            native: nativeInstallCheckbox?.checked ?? false,
+          });
 
           if (success) {
             installButton.textContent = "Installed";
