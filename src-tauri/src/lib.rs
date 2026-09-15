@@ -2,8 +2,8 @@ use std::env;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
-use std::sync::LazyLock;
+use std::process::{Child, Command, Stdio};
+use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Url};
@@ -16,6 +16,9 @@ pub static PORT: LazyLock<String> = LazyLock::new(|| {
     env::var("APP_PORT").unwrap_or_else(|_| "7000".to_string())
 });
 
+// Handle to the natively-spawned uvicorn process, so window close can stop it directly.
+static NATIVE_PROCESS: LazyLock<Mutex<Option<Child>>> = LazyLock::new(|| Mutex::new(None));
+
 fn status_url(page: &str) -> Url {
     #[cfg(target_os = "windows")]
     let prefix = "http://odysseus.localhost/";
@@ -27,7 +30,7 @@ fn status_url(page: &str) -> Url {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(is_installed: bool) {
+pub fn run(is_installed: bool, is_native: bool) {
     tauri::Builder::default()
         .register_uri_scheme_protocol("odysseus", move |_app, request| {
             let path = request.uri().path();
@@ -68,10 +71,16 @@ pub fn run(is_installed: bool) {
             let _ = window.navigate(status_url(initial_page));
 
             if is_installed {
-                println!("Odysseus is installed. Spinning up background services...");
+                println!("Odysseus is installed. Spinning up docker background services...");
 
                 std::thread::spawn(move || {
-                    if let Err(error) = run_odysseus() {
+                    let start_result = if is_native {
+                        run_odysseus_native()
+                    } else {
+                        run_odysseus_docker()
+                    };
+
+                    if let Err(error) = start_result {
                         println!("Could not start Odysseus: {error}");
                         if let Some(thread_window) =
                             app_handle.get_webview_window("main")
@@ -155,13 +164,13 @@ pub fn run(is_installed: bool) {
 
             Ok(())
         })
-        .on_window_event(|window, event| match event {
+        .on_window_event(move |window, event| match event {
             tauri::WindowEvent::CloseRequested { api: _, .. } => {
                 println!(
-                    "User clicked X on window: {}. Shutting down containers...",
+                    "User clicked X on window: {}. Shutting down backend...",
                     window.label()
                 );
-                close_odysseus();
+                close_odysseus(is_native);
                 println!("Teardown complete. Goodbye!");
             }
             _ => {}
@@ -354,7 +363,7 @@ fn ensure_docker_is_running() -> Result<(), String> {
     Err("Docker daemon took too long to start. Please check Docker Desktop manually.".to_string())
 }
 
-fn run_odysseus() -> Result<(), String> {
+fn run_odysseus_docker() -> Result<(), String> {
     ensure_docker_is_running()?;
 
     match run_system_command("docker", &["ps"]) {
@@ -388,7 +397,73 @@ fn run_odysseus() -> Result<(), String> {
     Ok(())
 }
 
-fn close_odysseus() {
+// Native (non-Docker) install: the venv lives inside the cloned repo at
+// get_odysseus_dir()/venv, laid out per the "Native Windows"/"Native Linux / macOS"
+// steps in docs/setup.md. Launches uvicorn directly with that venv's Python.
+fn run_odysseus_native() -> Result<(), String> {
+    let addr: SocketAddr = format!("127.0.0.1:{}", *PORT)
+        .parse()
+        .map_err(|e| format!("Invalid backend address: {e}"))?;
+
+    if TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok() {
+        println!("Odysseus is already running natively.");
+        return Ok(());
+    }
+
+    let target_dir = get_odysseus_dir();
+
+    #[cfg(target_os = "windows")]
+    let python_exe = target_dir.join("venv").join("Scripts").join("python.exe");
+
+    #[cfg(not(target_os = "windows"))]
+    let python_exe = target_dir.join("venv").join("bin").join("python");
+
+    if !python_exe.exists() {
+        return Err(format!(
+            "Native Python environment not found at {}. Reinstall Odysseus.",
+            python_exe.display()
+        ));
+    }
+
+    println!("Starting Odysseus natively...");
+    let child = Command::new(&python_exe)
+        .current_dir(&target_dir)
+        .args([
+            "-m",
+            "uvicorn",
+            "app:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            PORT.as_str(),
+        ])
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("Failed to launch the native Odysseus server: {e}"))?;
+
+    *NATIVE_PROCESS.lock().unwrap() = Some(child);
+    Ok(())
+}
+
+fn close_odysseus(is_native: bool) {
+    if is_native {
+        match NATIVE_PROCESS.lock().unwrap().take() {
+            Some(mut child) => {
+                println!("Stopping native Odysseus server (pid {})...", child.id());
+                match child.kill() {
+                    Ok(_) => {
+                        let _ = child.wait();
+                        println!("Native Odysseus server stopped.");
+                    }
+                    Err(e) => println!("Failed to stop native Odysseus server: {e}"),
+                }
+            }
+            None => println!("No native Odysseus process tracked; nothing to stop."),
+        }
+        return;
+    }
+
     if run_system_command("docker", &["info"]).is_err() {
         println!("Docker is offline. Assuming Odysseus is already stopped.");
         return;

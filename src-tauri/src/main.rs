@@ -3,24 +3,24 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
-    let is_installed = check_installation_state(check_os());
+    let (is_installed, is_native) = check_installation_state(check_os());
     println!("{}", is_installed);
-    odysseus_lib::run(is_installed);
+    odysseus_lib::run(is_installed, is_native);
 }
 
 fn check_os() -> &'static str {
     return std::env::consts::OS;
 }
 
-fn check_installation_state(os: &str) -> bool {
+fn check_installation_state(os: &str) -> (bool, bool) {
     let home_var = match os {
         "windows" => "USERPROFILE",
         "macos" | "linux" => "HOME",
-        _ => return false,
+        _ => return (false, false),
     };
 
     let Some(home) = std::env::var_os(home_var) else {
-        return false;
+        return (false, false);
     };
 
     let config_path = PathBuf::from(home)
@@ -29,14 +29,20 @@ fn check_installation_state(os: &str) -> bool {
         .join("config.json");
 
     let Ok(config_file) = fs::File::open(&config_path) else {
-        return false;
+        return (false, false);
     };
 
     let config_json: serde_json::Value =
         serde_json::from_reader(config_file).unwrap_or(serde_json::Value::Null);
 
-    config_json
-        .get("installed")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
+    return (
+        config_json
+            .get("installed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        config_json
+            .get("is_native")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    );
 }
