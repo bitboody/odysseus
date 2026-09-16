@@ -8,10 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tauri::{Manager, Url};
 
-mod native;
 mod platform;
 
-const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(300);
+const BACKEND_STARTUP_TIMEOUT: Duration = Duration::from_secs(600);
 pub static PORT: LazyLock<String> = LazyLock::new(|| {
     dotenv::from_path(get_odysseus_dir().join(".env")).ok();
     env::var("APP_PORT").unwrap_or_else(|_| "7000".to_string())
@@ -28,7 +27,7 @@ fn status_url(page: &str) -> Url {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(is_installed: bool, is_native: bool) {
+pub fn run(is_installed: bool) {
     tauri::Builder::default()
         .register_uri_scheme_protocol("odysseus", move |_app, request| {
             let path = request.uri().path();
@@ -69,16 +68,10 @@ pub fn run(is_installed: bool, is_native: bool) {
             let _ = window.navigate(status_url(initial_page));
 
             if is_installed {
-                println!("Odysseus is installed. Spinning up docker background services...");
+                println!("Odysseus is installed. Spinning up background services...");
 
                 std::thread::spawn(move || {
-                    let start_result = if is_native {
-                        native::run_odysseus_native()
-                    } else {
-                        run_odysseus_docker()
-                    };
-
-                    if let Err(error) = start_result {
+                    if let Err(error) = run_odysseus() {
                         println!("Could not start Odysseus: {error}");
                         if let Some(thread_window) =
                             app_handle.get_webview_window("main")
@@ -162,22 +155,19 @@ pub fn run(is_installed: bool, is_native: bool) {
 
             Ok(())
         })
-        .on_window_event(move |window, event| match event {
+        .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api: _, .. } => {
                 println!(
-                    "User clicked X on window: {}. Shutting down backend...",
+                    "User clicked X on window: {}. Shutting down containers...",
                     window.label()
                 );
-                close_odysseus(is_native);
+                close_odysseus();
                 println!("Teardown complete. Goodbye!");
             }
             _ => {}
         })
         // Point the handler to the module namespace
-        .invoke_handler(tauri::generate_handler![
-            commands::installation_script,
-            commands::check_installation_status
-        ])
+        .invoke_handler(tauri::generate_handler![commands::installation_script])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -187,9 +177,14 @@ pub mod commands {
 
     use super::*;
 
-    // Verifies (and attempts to auto-fix) the prerequisites the install script depends on.
     #[tauri::command]
-    pub fn check_installation_status(native: bool) -> (String, bool) {
+    pub fn check_installation_status() -> bool {
+        let config_path = get_config_dir().join("config.json");
+        config_path.exists()
+    }
+
+    #[tauri::command]
+    pub async fn installation_script() -> (String, bool) {
         match run_system_command("git", &["--version"]) {
             Ok(output) => println!("Found Git: {}", output.trim()),
             Err(_) => match platform::install_git() {
@@ -203,65 +198,48 @@ pub mod commands {
             },
         }
 
-        if native {
-            return match native::find_python_command() {
-                Ok(_) => (String::new(), true),
-                Err(e) => (e, false),
-            };
-        }
-
-        if let Err(e) = ensure_docker_is_running() {
-            return (format!("Could not start Docker: {e}"), false);
-        }
-
-        (String::new(), true)
-    }
-
-    #[tauri::command]
-    pub async fn installation_script(native: bool) -> (String, bool) {
-        let (message, ready) = check_installation_status(native);
-        if !ready {
-            return (message, false);
+        match run_system_command("docker", &["info"]) {
+            Ok(_) => println!("Docker CLI found and Engine is running."),
+            Err(_) => {
+                return (
+                    "Docker is not running. Please open Docker Desktop and try again.".to_string(),
+                    false,
+                );
+            }
         }
 
         let target_dir = get_odysseus_dir();
 
         if target_dir.exists() {
-            if !target_dir.join("app.py").exists() {
+            return (
+                format!(
+                    "Installation directory already exists: {}. Refusing to run Docker Compose from it.",
+                    target_dir.display()
+                ),
+                false,
+            );
+        }
+
+        let clone_result = Command::new("git")
+            .args(["clone", "https://github.com/odysseus-dev/odysseus.git"])
+            .arg(&target_dir)
+            .output();
+
+        match clone_result {
+            Ok(output) if output.status.success() => println!(
+                "Git repository cloned successfully: {}",
+                String::from_utf8_lossy(&output.stdout).trim()
+            ),
+            Ok(output) => {
                 return (
                     format!(
-                        "Installation directory already exists and doesn't look like an Odysseus checkout: {}. Remove it or choose a different location, then retry.",
-                        target_dir.display()
+                        "Failed to clone repository: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
                     ),
                     false,
-                );
+                )
             }
-            println!(
-                "Found an existing Odysseus checkout at {}. Reusing it.",
-                target_dir.display()
-            );
-        } else {
-            let clone_result = Command::new("git")
-                .args(["clone", "https://github.com/odysseus-dev/odysseus.git"])
-                .arg(&target_dir)
-                .output();
-
-            match clone_result {
-                Ok(output) if output.status.success() => println!(
-                    "Git repository cloned successfully: {}",
-                    String::from_utf8_lossy(&output.stdout).trim()
-                ),
-                Ok(output) => {
-                    return (
-                        format!(
-                            "Failed to clone repository: {}",
-                            String::from_utf8_lossy(&output.stderr).trim()
-                        ),
-                        false,
-                    )
-                }
-                Err(e) => return (format!("Failed to execute git clone: {e}"), false),
-            }
+            Err(e) => return (format!("Failed to execute git clone: {e}"), false),
         }
 
         let env_example_path = target_dir.join(".env.example-desktop");
@@ -278,46 +256,42 @@ pub mod commands {
             }
         }
 
-        if native {
-            println!("Native install requested — the platform launcher script sets up the Python environment on first run.");
-        } else {
-            println!("Building Odysseus with optional extras (this will take a while)...");
-            let build_status = Command::new("docker")
-                .current_dir(&target_dir)
-                .args(["compose", "build", "--build-arg", "INSTALL_OPTIONAL=true"])
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .status();
+        println!("Building Odysseus with optional extras (this will take a while)...");
+        let build_status = Command::new("docker")
+            .current_dir(&target_dir)
+            .args(["compose", "build", "--build-arg", "INSTALL_OPTIONAL=true"])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status();
 
-            match build_status {
-                Ok(status) if status.success() => println!("Build successful!"),
-                Ok(status) => {
-                    return (
-                        format!("Docker build failed with status: {}", status),
-                        false,
-                    )
-                }
-                Err(e) => return (format!("Failed to execute docker build: {}", e), false),
+        match build_status {
+            Ok(status) if status.success() => println!("Build successful!"),
+            Ok(status) => {
+                return (
+                    format!("Docker build failed with status: {}", status),
+                    false,
+                )
             }
+            Err(e) => return (format!("Failed to execute docker build: {}", e), false),
+        }
 
-            println!("Starting Odysseus containers...");
-            let up_status = Command::new("docker")
-                .current_dir(&target_dir)
-                .args(["compose", "up", "-d", "--build"])
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
-                .status();
+        println!("Starting Odysseus containers...");
+        let up_status = Command::new("docker")
+            .current_dir(&target_dir)
+            .args(["compose", "up", "-d", "--build"])
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status();
 
-            match up_status {
-                Ok(status) if status.success() => println!("Docker compose up executed successfully!"),
-                Ok(status) => {
-                    return (
-                        format!("Docker compose up failed with status: {}", status),
-                        false,
-                    )
-                }
-                Err(e) => return (format!("Failed to execute docker up command: {}", e), false),
+        match up_status {
+            Ok(status) if status.success() => println!("Docker compose up executed successfully!"),
+            Ok(status) => {
+                return (
+                    format!("Docker compose up failed with status: {}", status),
+                    false,
+                )
             }
+            Err(e) => return (format!("Failed to execute docker up command: {}", e), false),
         }
 
         // Write config.json into Documents/Odysseus Desktop/config.json
@@ -330,9 +304,9 @@ pub mod commands {
         }
 
         let config_path = config_dir.join("config.json");
-        let config_content = format!("{{\n  \"installed\": true,\n  \"is_native\": {native}\n}}\n");
+        let config_content = "{\n  \"installed\": true\n}\n";
 
-        if let Err(e) = std::fs::write(&config_path, &config_content) {
+        if let Err(e) = std::fs::write(&config_path, config_content) {
             return (
                 format!("Could not create the installation marker: {e}"),
                 false,
@@ -378,7 +352,7 @@ fn ensure_docker_is_running() -> Result<(), String> {
     Err("Docker daemon took too long to start. Please check Docker Desktop manually.".to_string())
 }
 
-fn run_odysseus_docker() -> Result<(), String> {
+fn run_odysseus() -> Result<(), String> {
     ensure_docker_is_running()?;
 
     match run_system_command("docker", &["ps"]) {
@@ -412,12 +386,7 @@ fn run_odysseus_docker() -> Result<(), String> {
     Ok(())
 }
 
-fn close_odysseus(is_native: bool) {
-    if is_native {
-        native::stop_odysseus_native();
-        return;
-    }
-
+fn close_odysseus() {
     if run_system_command("docker", &["info"]).is_err() {
         println!("Docker is offline. Assuming Odysseus is already stopped.");
         return;
@@ -460,7 +429,7 @@ fn get_documents_dir() -> PathBuf {
     PathBuf::from(base_dir).join("Documents")
 }
 
-pub(crate) fn get_odysseus_dir() -> PathBuf {
+fn get_odysseus_dir() -> PathBuf {
     get_documents_dir().join("Odysseus")
 }
 
