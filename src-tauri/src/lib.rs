@@ -344,10 +344,6 @@ pub mod commands {
     }
 }
 
-// ---------------------------------------------------------
-// HELPER FUNCTIONS
-// ---------------------------------------------------------
-
 fn ensure_docker_is_running() -> Result<(), String> {
     if run_system_command("docker", &["info"]).is_ok() {
         return Ok(());
@@ -440,6 +436,10 @@ fn close_odysseus() {
         Err(_) => println!("Unexpected error checking docker ps."),
     }
 }
+
+// ---------------------------------------------------------
+// HELPER FUNCTIONS
+// ---------------------------------------------------------
 
 fn get_documents_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
