@@ -58,11 +58,31 @@ pub fn find_python_command() -> Result<&'static str, String> {
             return Ok(candidate);
         }
     }
-    if run_system_command("winget", &["install", "Python.Python.3.13"]).is_ok() {
-        return Ok("Installing python via winget");
+
+    if run_system_command("winget", &["--version"]).is_ok() {
+        if run_system_command(
+            "winget",
+            &[
+                "install",
+                "--id",
+                "Python.Python.3.13",
+                "--exact",
+                "--accept-source-agreements",
+                "--accept-package-agreements",
+            ],
+        )
+        .is_ok()
+        {
+            return Err(
+                "Python was installed successfully. Please restart Odysseus and try again."
+                    .to_string(),
+            );
+        }
     }
+
     Err(
-        "Python 3.11+ was not found on PATH and could not be installed through winget. Install it from https://www.python.org/downloads/ and retry."
+        "Python 3.11+ was not found and could not be installed automatically. \
+         Please install Python from https://www.python.org/downloads/ and retry."
             .to_string(),
     )
 }
