@@ -58,8 +58,11 @@ pub fn find_python_command() -> Result<&'static str, String> {
             return Ok(candidate);
         }
     }
+    if run_system_command("winget", &["install", "Python.Python.3.13"]).is_ok() {
+        return Ok("Installing python via winget");
+    }
     Err(
-        "Python 3.11+ was not found on PATH. Install it from https://www.python.org/downloads/ and retry."
+        "Python 3.11+ was not found on PATH and could not be installed through winget. Install it from https://www.python.org/downloads/ and retry."
             .to_string(),
     )
 }
@@ -86,6 +89,13 @@ fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
             "-BindHost",
             "127.0.0.1",
         ])
+        // Windows auto-allocates a *new*, easy-to-miss console for this console
+        // subprocess (unlike macOS/Linux, where a GUI parent's console-less child
+        // just gets a non-tty stdin). Without this, setup.py sees an interactive
+        // tty and blocks forever on `input()` for admin credentials in that
+        // hidden window, which looks like the installer hung. Skip the prompt so
+        // it falls back to an auto-generated password (printed to the console).
+        .env("ODYSSEUS_SKIP_ADMIN_PROMPT", "1")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
@@ -210,4 +220,3 @@ pub fn stop_odysseus_native() {
         None => println!("No native Odysseus process tracked; nothing to stop."),
     }
 }
-

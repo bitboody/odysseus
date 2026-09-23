@@ -65,8 +65,16 @@ function Find-GitBash {
 # 1. Locate a Python interpreter (3.11+ required)
 Write-Step "Checking for Python"
 function Get-PythonVersionText($launcher, $launcherArgs) {
+    # The newer "py" launcher (Python Install Manager) prints its
+    # "[ERROR] No runtime installed..." message to stdout, not stderr, so a
+    # plain `2>$null` redirect doesn't hide it - validate both the exit code
+    # and that the output actually looks like a version string before trusting it.
     try {
-        return (& $launcher @launcherArgs -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null).Trim()
+        $output = & $launcher @launcherArgs -c "import sys; print('.'.join(map(str, sys.version_info[:3])))" 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $output) { return $null }
+        $candidate = ($output | Select-Object -Last 1).ToString().Trim()
+        if ($candidate -match '^\d+\.\d+\.\d+$') { return $candidate }
+        return $null
     } catch {
         return $null
     }
@@ -85,6 +93,19 @@ if ($pyLauncher) {
             $pyArgs = @($v)
             $pyVersion = $ver
             break
+        }
+    }
+
+    # No runtime registered with the launcher at all - the Python Install
+    # Manager can fetch one on demand, so try that before giving up.
+    if (-not $pyExe) {
+        Write-Host "No Python runtime registered with the 'py' launcher. Trying 'py install 3.11'..." -ForegroundColor Yellow
+        & $pyLauncher.Source install 3.11 2>$null | Out-Null
+        $ver = Get-PythonVersionText $pyLauncher.Source @("-3.11")
+        if ($ver) {
+            $pyExe = $pyLauncher.Source
+            $pyArgs = @("-3.11")
+            $pyVersion = $ver
         }
     }
 }
@@ -114,7 +135,7 @@ if ($pyExe -like "*WindowsApps*python.exe") {
 }
 
 if (-not $pyExe) {
-    Fail "Couldn't find Python 3.11+ for Windows setup. Install Python 3.11+ (or open the Python launcher with 'py -3.11') from https://www.python.org/downloads/, then re-run this script."
+    Fail "Couldn't find Python 3.11+ for Windows setup. Run 'py install 3.11' (or install Python 3.11+ from https://www.python.org/downloads/), then re-run this script."
 }
 $pythonLabel = ("Using Python {0}: {1} {2}" -f $pyVersion, $pyExe, ($pyArgs -join ' ')).TrimEnd()
 Write-Host $pythonLabel
