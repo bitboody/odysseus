@@ -226,6 +226,41 @@ pub fn run_odysseus_native() -> Result<(), String> {
     let child = spawn_launcher(&target_dir)?;
 
     *NATIVE_PROCESS.lock().unwrap() = Some(child);
+
+    // Actively wait for the server to spin up (handling first-run pip installs)
+    println!("Waiting for Odysseus server to start up (this may take a minute on first run)...");
+    let start_time = std::time::Instant::now();
+    let timeout = Duration::from_secs(180); // 3 minutes timeout for dependency installation
+
+    loop {
+        // Try connecting to the local port every 1 second
+        if TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok() {
+            println!("Odysseus server is up and responding!");
+            break;
+        }
+
+        // Check if the spawned PowerShell/bash process crashed or exited early
+        if let Some(child_process) = NATIVE_PROCESS.lock().unwrap().as_mut() {
+            match child_process.try_wait() {
+                Ok(Some(status)) => {
+                    return Err(format!(
+                        "Launcher script exited prematurely with status: {status}"
+                    ));
+                }
+                Err(e) => {
+                    return Err(format!("Error monitoring launcher process: {e}"));
+                }
+                Ok(None) => {} // Process is still alive, keep waiting for uvicorn
+            }
+        }
+
+        if start_time.elapsed() > timeout {
+            return Err("Timed out waiting for Odysseus server to start up.".to_string());
+        }
+
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
     Ok(())
 }
 

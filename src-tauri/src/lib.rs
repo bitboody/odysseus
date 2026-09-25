@@ -219,7 +219,8 @@ pub mod commands {
                 Ok(_) => println!("Docker CLI found and Engine is running."),
                 Err(_) => {
                     return (
-                        "Docker is not running. Please open Docker Desktop and try again.".to_string(),
+                        "Docker is not running. Please open Docker Desktop and try again."
+                            .to_string(),
                         false,
                     );
                 }
@@ -239,7 +240,12 @@ pub mod commands {
         }
 
         let clone_result = Command::new("git")
-            .args(["clone", "https://github.com/bitboody/odysseus.git", "--branch", "tauri"])
+            .args([
+                "clone",
+                "https://github.com/bitboody/odysseus.git",
+                "--branch",
+                "tauri",
+            ])
             .arg(&target_dir)
             .output();
 
@@ -305,7 +311,9 @@ pub mod commands {
                 .status();
 
             match up_status {
-                Ok(status) if status.success() => println!("Docker compose up executed successfully!"),
+                Ok(status) if status.success() => {
+                    println!("Docker compose up executed successfully!")
+                }
                 Ok(status) => {
                     return (
                         format!("Docker compose up failed with status: {}", status),
@@ -335,6 +343,16 @@ pub mod commands {
             );
         }
         println!("Successfully created config.json at {:?}", config_path);
+
+        if native {
+            println!("Launching native Odysseus and waiting for it to finish...");
+            match native::run_odysseus_native() {
+                Ok(_) => println!("Native Odysseus process exited cleanly."),
+                Err(e) => {
+                    return (format!("Native Odysseus execution failed: {e}"), false);
+                }
+            }
+        }
 
         println!("Odysseus installation script executed successfully.");
         (
