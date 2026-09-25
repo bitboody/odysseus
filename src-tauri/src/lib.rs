@@ -239,7 +239,7 @@ pub mod commands {
         }
 
         let clone_result = Command::new("git")
-            .args(["clone", "https://github.com/odysseus-dev/odysseus.git"])
+            .args(["clone", "https://github.com/bitboody/odysseus.git", "--branch", "tauri"])
             .arg(&target_dir)
             .output();
 
