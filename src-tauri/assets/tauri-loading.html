@@ -26,22 +26,6 @@
     </div>
 
     <script>
-      const messages = [
-        "Starting background services...",
-      ];
-
-      const statusElement = document.getElementById("status-text");
-      let currentIndex = 0;
-
-      setInterval(() => {
-        statusElement.style.opacity = "0";
-
-        setTimeout(() => {
-          currentIndex = (currentIndex + 1) % messages.length;
-          statusElement.innerText = messages[currentIndex];
-          statusElement.style.opacity = "1";
-        }, 150);
-      }, 2500);
     </script>
   </body>
 </html>
