@@ -12,7 +12,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
-use crate::{get_odysseus_dir, run_system_command, PORT};
+use crate::{
+    explain_failure, forward_lines, get_odysseus_dir, run_system_command, OutputTail, PORT,
+};
 
 // Handle to the natively-spawned server process, so window close can stop it directly.
 static NATIVE_PROCESS: LazyLock<Mutex<Option<Child>>> = LazyLock::new(|| Mutex::new(None));
@@ -140,7 +142,7 @@ fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
         .env("ODYSSEUS_HOST", "127.0.0.1")
         .env("ODYSSEUS_NO_OPEN", "1")
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
     new_process_group(&mut command);
 
     command
@@ -153,8 +155,9 @@ fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
 #[cfg(target_os = "linux")]
 fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
     let venv_python = venv_python_path(target_dir);
+    let setup_done = target_dir.join("venv").join(".setup_done");
 
-    if !venv_python.exists() {
+    if !setup_done.exists() {
         let python = find_python_command()?;
 
         let status = Command::new(python)
@@ -168,15 +171,17 @@ fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
             return Err(format!("Failed to create virtual environment: {status}"));
         }
 
-        let install_status = Command::new(&venv_python)
+        let (install_status, install_output) = Command::new(&venv_python)
             .current_dir(target_dir)
             .args(["-m", "pip", "install", "-r", "requirements.txt"])
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .and_then(crate::wait_with_logged_output)
             .map_err(|e| format!("Failed to execute pip install: {e}"))?;
         if !install_status.success() {
-            return Err(format!("Failed to install dependencies: {install_status}"));
+            return Err(explain_failure(install_output.lines())
+                .unwrap_or_else(|| format!("Failed to install dependencies: {install_status}")));
         }
 
         let setup_status = Command::new(&venv_python)
@@ -189,6 +194,7 @@ fn spawn_launcher(target_dir: &Path) -> Result<Child, String> {
         if !setup_status.success() {
             return Err(format!("setup.py failed: {setup_status}"));
         }
+        let _ = std::fs::write(&setup_done, "");
     }
 
     let mut command = Command::new(&venv_python);
@@ -224,14 +230,19 @@ pub fn run_odysseus_native() -> Result<(), String> {
 
     let target_dir = get_odysseus_dir();
     println!("Starting Odysseus natively via the platform launcher script...");
-    let child = spawn_launcher(&target_dir)?;
+    let mut child = spawn_launcher(&target_dir)?;
+
+    // Only the macOS launcher pipes stderr, kept to explain a failed start.
+    let errors = OutputTail::default();
+    forward_lines(child.stderr.take(), std::io::stderr(), &errors);
+    let explain = || explain_failure(errors.lock().unwrap().iter().map(String::as_str));
 
     *NATIVE_PROCESS.lock().unwrap() = Some(child);
 
     // Actively wait for the server to spin up (handling first-run pip installs)
     println!("Waiting for Odysseus server to start up (this may take a minute on first run)...");
     let start_time = std::time::Instant::now();
-    let timeout = Duration::from_secs(180); // 3 minutes timeout for dependency installation
+    let timeout = crate::BACKEND_STARTUP_TIMEOUT;
 
     loop {
         // Try connecting to the local port every 1 second
@@ -244,9 +255,9 @@ pub fn run_odysseus_native() -> Result<(), String> {
         if let Some(child_process) = NATIVE_PROCESS.lock().unwrap().as_mut() {
             match child_process.try_wait() {
                 Ok(Some(status)) => {
-                    return Err(format!(
-                        "Launcher script exited prematurely with status: {status}"
-                    ));
+                    return Err(explain().unwrap_or_else(|| {
+                        format!("Launcher script exited prematurely with status: {status}")
+                    }));
                 }
                 Err(e) => {
                     return Err(format!("Error monitoring launcher process: {e}"));
@@ -256,7 +267,9 @@ pub fn run_odysseus_native() -> Result<(), String> {
         }
 
         if start_time.elapsed() > timeout {
-            return Err("Timed out waiting for Odysseus server to start up.".to_string());
+            return Err(explain().unwrap_or_else(|| {
+                "Timed out waiting for Odysseus server to start up.".to_string()
+            }));
         }
 
         std::thread::sleep(Duration::from_secs(1));

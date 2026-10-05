@@ -56,14 +56,14 @@
       <div class="modal-card">
         <h2>System Requirements</h2>
         <p class="lead">
-          Odysseus runs in Docker by default. Here's what each OS needs to
+          Odysseus runs in Docker by default (except on macOS). Here's what each OS needs to
           run it, plus a couple of platform-specific quirks worth knowing
           about up front.
         </p>
 
         <h3>Docker vs. Native</h3>
         <ul class="feature-list">
-          <li>Docker (default): Odysseus and its bundled services (ChromaDB, SearXNG, ntfy) run in isolated containers. Easiest to keep updated and removed cleanly; identical setup on every OS; requires Docker Desktop/Engine installed and running.</li>
+          <li>Docker (default, except on Apple Silicon Macs with Homebrew): Odysseus and its bundled services (ChromaDB, SearXNG, ntfy) run in isolated containers. Easiest to keep updated and removed cleanly; identical setup on every OS; requires Docker Desktop/Engine installed and running.</li>
           <li>Native: Odysseus runs directly on this machine inside a Python virtual environment, no Docker required. Useful when Docker isn't available or wanted, or for full local GPU access on Apple Silicon. Requires Python 3.11+ on PATH, and bundled services like ChromaDB/SearXNG are not started automatically.</li>
         </ul>
 
@@ -79,7 +79,7 @@
         <h3>macOS</h3>
         <ul class="feature-list">
           <li>Docker Desktop for Mac installed and running</li>
-          <li>Apple Silicon (M-series): Docker can't reach the Metal GPU, so local model serving runs on CPU only inside the container</li>
+          <li>Apple Silicon (M-series): Docker can't reach the Metal GPU, so the native install is the default when Homebrew is installed</li>
           <li>At least 4 GB RAM allocated to Docker</li>
         </ul>
 
