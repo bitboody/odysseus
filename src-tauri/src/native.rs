@@ -249,6 +249,9 @@ pub fn run_odysseus_native() -> Result<(), String> {
 
     // Actively wait for the server to spin up (handling first-run pip installs)
     println!("Waiting for Odysseus server to start up (this may take a minute on first run)...");
+    #[cfg(target_os = "macos")]
+    let mut start_time = std::time::Instant::now();
+    #[cfg(not(target_os = "macos"))]
     let start_time = std::time::Instant::now();
     let timeout = crate::BACKEND_STARTUP_TIMEOUT;
 
@@ -272,6 +275,12 @@ pub fn run_odysseus_native() -> Result<(), String> {
                 }
                 Ok(None) => {} // Process is still alive, keep waiting for uvicorn
             }
+        }
+
+        // start-macos.sh writes this after its brew and pip install; Linux installs before this wait.
+        #[cfg(target_os = "macos")]
+        if !target_dir.join("venv").join(".requirements_hash").exists() {
+            start_time = std::time::Instant::now();
         }
 
         if start_time.elapsed() > timeout {
